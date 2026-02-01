@@ -48,6 +48,26 @@ pub const VM = struct {
         return self.chunk.?.constants.items[offset];
     }
 
+    fn add(a: f64, b: f64) f64 {
+        return a + b;
+    }
+    fn sub(a: f64, b: f64) f64 {
+        return a - b;
+    }
+    fn mul(a: f64, b: f64) f64 {
+        return a * b;
+    }
+    fn div(a: f64, b: f64) f64 {
+        return a / b;
+    }
+
+    fn binaryOp(self: *VM, allocator: std.mem.Allocator, comptime op: fn (f64, f64) f64) !void {
+        const b = self.pop();
+        const a = self.pop();
+        const result = value_mod.Value{ .double = op(a.double, b.double) };
+        try self.push(allocator, result);
+    }
+
     pub fn run(self: *VM, allocator: std.mem.Allocator) !void {
         while (true) {
             if (comptime build_options.trace) {
@@ -72,6 +92,17 @@ pub const VM = struct {
                     const constant = self.readConstant();
                     try self.push(allocator, constant);
                 },
+                .OP_NEGATE => {
+                    const value = self.pop();
+                    const result = switch (value) {
+                        .double => |double| value_mod.Value{ .double = -double },
+                    };
+                    try self.push(allocator, result);
+                },
+                .OP_ADD => try self.binaryOp(allocator, add),
+                .OP_SUBTRACT => try self.binaryOp(allocator, sub),
+                .OP_MULTIPLY => try self.binaryOp(allocator, mul),
+                .OP_DIVIDE => try self.binaryOp(allocator, div),
             }
         }
     }
@@ -80,3 +111,24 @@ pub const VM = struct {
         self.stack.deinit(allocator);
     }
 };
+
+test "addition" {
+    const gpa = std.testing.allocator;
+
+    var vm = VM.init;
+    defer vm.deinit(gpa);
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(gpa);
+
+    var constant = try chunk.addConstant(gpa, .{ .double = 1.2 });
+    try chunk.write(gpa, @intFromEnum(chunk_mod.OpCode.OP_CONSTANT), 123);
+    try chunk.write(gpa, constant, 123);
+    constant = try chunk.addConstant(gpa, .{ .double = 3.4 });
+    try chunk.write(gpa, @intFromEnum(chunk_mod.OpCode.OP_CONSTANT), 123);
+    try chunk.write(gpa, constant, 123);
+    try chunk.write(gpa, @intFromEnum(chunk_mod.OpCode.OP_ADD), 123);
+    try chunk.write(gpa, @intFromEnum(chunk_mod.OpCode.OP_RETURN), 123);
+
+    try vm.interpret(gpa, &chunk);
+    try std.testing.expect(true);
+}

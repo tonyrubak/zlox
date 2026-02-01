@@ -14,6 +14,7 @@ pub fn main() !void {
     const constant = try chunk.addConstant(allocator, .{ .double = 1.2 });
     try chunk.write(allocator, @intFromEnum(zlox.chunk.OpCode.OP_CONSTANT), 123);
     try chunk.write(allocator, constant, 123);
+    try chunk.write(allocator, @intFromEnum(zlox.chunk.OpCode.OP_NEGATE), 123);
     try chunk.write(allocator, @intFromEnum(zlox.chunk.OpCode.OP_RETURN), 123);
     try vm.interpret(allocator, &chunk);
 }

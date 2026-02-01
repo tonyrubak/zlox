@@ -21,8 +21,13 @@ pub fn disassembleInstruction(c: *chunk_mod.Chunk, offset: usize) usize {
 
     const instruction: chunk_mod.OpCode = @enumFromInt(c.*.code.items[offset]);
     switch (instruction) {
+        .OP_NEGATE => return simpleInstruction("OP_NEGATE", offset),
         .OP_RETURN => return simpleInstruction("OP_RETURN", offset),
         .OP_CONSTANT => return constantInstruction("OP_CONSTANT", c, offset),
+        .OP_ADD => return simpleInstruction("OP_ADD", offset),
+        .OP_SUBTRACT => return simpleInstruction("OP_SUBTRACT", offset),
+        .OP_MULTIPLY => return simpleInstruction("OP_MULTIPLY", offset),
+        .OP_DIVIDE => return simpleInstruction("OP_DIVIDE", offset),
     }
 }
 
