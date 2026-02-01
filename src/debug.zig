@@ -13,6 +13,12 @@ pub fn disassembleChunk(self: chunk.Chunk, name: []const u8) void {
 fn disassembleInstruction(c: chunk.Chunk, offset: usize) usize {
     std.debug.print("{d:04} ", .{offset});
 
+    if (offset > 0 and c.lines.items[offset] == c.lines.items[offset - 1]) {
+        std.debug.print("   | ", .{});
+    } else {
+        std.debug.print("{d:4} ", .{c.lines.items[offset]});
+    }
+
     const instruction: chunk.OpCode = @enumFromInt(c.code.items[offset]);
     switch (instruction) {
         .OP_RETURN => return simpleInstruction("OP_RETURN", offset),
@@ -29,6 +35,6 @@ fn constantInstruction(name: []const u8, c: chunk.Chunk, offset: usize) usize {
     const constant = c.code.items[offset + 1];
     std.debug.print("{s: <16} {d: >4} '", .{ name, constant });
     c.constants.items[constant].print();
-    std.debug.print("\n", .{});
+    std.debug.print("'\n", .{});
     return offset + 2;
 }
