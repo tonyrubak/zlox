@@ -39,6 +39,7 @@ test "create and write to chunk" {
 
     var chunk = Chunk.empty;
     defer chunk.deinit(gpa);
-    try chunk.write(gpa, .OP_RETURN);
-    try std.testing.expectEqual(chunk.code.items[0], .OP_RETURN);
+    try chunk.write(gpa, @intFromEnum(OpCode.OP_RETURN), 1);
+    const opcode: OpCode = @enumFromInt(chunk.code.items[0]);
+    try std.testing.expectEqual(opcode, .OP_RETURN);
 }
