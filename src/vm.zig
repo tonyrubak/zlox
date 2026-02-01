@@ -1,3 +1,4 @@
+const build_options = @import("build_options");
 const std = @import("std");
 const chunk_mod = @import("chunk.zig");
 const value_mod = @import("value.zig");
@@ -49,7 +50,7 @@ pub const VM = struct {
 
     pub fn run(self: *VM, allocator: std.mem.Allocator) !void {
         while (true) {
-            if (self.trace_execution) {
+            if (comptime build_options.trace) {
                 std.debug.print("          ", .{});
                 for (self.stack.items) |item| {
                     std.debug.print("[ ", .{});

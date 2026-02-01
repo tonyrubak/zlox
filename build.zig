@@ -28,6 +28,10 @@ pub fn build(b: *std.Build) void {
     // to our consumers. We must give it a name because a Zig package can expose
     // multiple modules and consumers will need to be able to specify which
     // module they want to access.
+    const trace = b.option(bool, "trace", "Enable VM execution tracing") orelse false;
+    const options = b.addOptions();
+    options.addOption(bool, "trace", trace);
+
     const mod = b.addModule("zlox", .{
         // The root source file is the "entry point" of this module. Users of
         // this module will only be able to access public declarations contained
@@ -40,6 +44,8 @@ pub fn build(b: *std.Build) void {
         // which requires us to specify a target.
         .target = target,
     });
+
+    mod.addOptions("build_options", options);
 
     // Here we define an executable. An executable needs to have a root module
     // which needs to expose a `main` function. While we could add a main function
@@ -57,6 +63,8 @@ pub fn build(b: *std.Build) void {
     //
     // If neither case applies to you, feel free to delete the declaration you
     // don't need and to put everything under a single module.
+    //
+
     const exe = b.addExecutable(.{
         .name = "zlox",
         .root_module = b.createModule(.{
