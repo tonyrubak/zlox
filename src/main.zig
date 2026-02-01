@@ -2,26 +2,18 @@ const std = @import("std");
 const zlox = @import("zlox");
 
 pub fn main() !void {
-    // Prints to stderr, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    try zlox.bufferedPrint();
+    const allocator = std.heap.page_allocator;
+    var chunk = zlox.chunk.Chunk.empty;
+    try chunk.write(allocator, @intFromEnum(zlox.chunk.OpCode.OP_RETURN));
+    zlox.debug.disassembleChunk(chunk, "test chunk");
+    chunk.deinit(allocator);
 }
 
-test "simple test" {
+test "create and write to chunk" {
     const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
 
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+    var chunk = zlox.chunk.Chunk.empty;
+    defer chunk.deinit(gpa);
+    try chunk.write(gpa, @intFromEnum(zlox.chunk.OpCode.OP_RETURN));
+    try std.testing.expectEqual(chunk.code[0], @intFromEnum(zlox.chunk.OpCode.OP_RETURN));
 }
