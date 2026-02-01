@@ -1,35 +1,40 @@
 const std = @import("std");
+const value = @import("value.zig");
 
-pub const OpCode = enum {
+pub const OpCode = enum(u8) {
+    OP_CONSTANT,
     OP_RETURN,
 };
 
 pub const Chunk = struct {
-    const Self = @This();
+    code: std.ArrayList(u8),
+    constants: std.ArrayList(value.Value),
 
-    count: usize,
-    capacity: usize,
-    code: []u8,
-
-    pub const empty: Self = .{
-        .count = 0,
-        .capacity = 0,
-        .code = &.{},
+    pub const empty = Chunk{
+        .code = .empty,
+        .constants = .empty,
     };
 
     pub fn write(self: *Chunk, allocator: std.mem.Allocator, byte: u8) !void {
-        if (self.capacity < self.count + 1) {
-            const new_capacity = if (self.capacity == 0) 8 else self.capacity * 2;
-            self.code = try allocator.realloc(self.code, new_capacity);
-            self.capacity = new_capacity;
-        }
+        return self.code.append(allocator, byte);
+    }
 
-        self.code[self.count] = byte;
-        self.count += 1;
+    pub fn addConstant(self: *Chunk, allocator: std.mem.Allocator, v: value.Value) !u8 {
+        try self.constants.append(allocator, v);
+        return @intCast(self.constants.items.len - 1);
     }
 
     pub fn deinit(self: *Chunk, allocator: std.mem.Allocator) void {
-        allocator.free(self.code);
-        self.* = .empty;
+        self.code.deinit(allocator);
+        self.constants.deinit(allocator);
     }
 };
+
+test "create and write to chunk" {
+    const gpa = std.testing.allocator;
+
+    var chunk = Chunk.empty;
+    defer chunk.deinit(gpa);
+    try chunk.write(gpa, .OP_RETURN);
+    try std.testing.expectEqual(chunk.code.items[0], .OP_RETURN);
+}
