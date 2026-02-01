@@ -9,5 +9,3 @@ pub const Value = union(enum) {
         }
     }
 };
-
-pub const ValueArray = std.ArrayList(Value);

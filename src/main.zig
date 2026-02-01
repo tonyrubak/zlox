@@ -15,6 +15,5 @@ pub fn main() !void {
     try chunk.write(allocator, @intFromEnum(zlox.chunk.OpCode.OP_CONSTANT), 123);
     try chunk.write(allocator, constant, 123);
     try chunk.write(allocator, @intFromEnum(zlox.chunk.OpCode.OP_RETURN), 123);
-    zlox.debug.disassembleChunk(chunk, "test chunk");
-    try vm.interpret(&chunk);
+    try vm.interpret(allocator, &chunk);
 }
