@@ -3,6 +3,7 @@ const std = @import("std");
 const chunk_mod = @import("chunk.zig");
 const value_mod = @import("value.zig");
 const debug_mod = @import("debug.zig");
+const compiler_mod = @import("compiler.zig");
 
 pub const InterpretError = error{
     InterpretCompileError,
@@ -30,10 +31,8 @@ pub const VM = struct {
         return self.stack.pop() orelse unreachable;
     }
 
-    pub fn interpret(self: *VM, allocator: std.mem.Allocator, chunk_ptr: *chunk_mod.Chunk) !void {
-        self.chunk = chunk_ptr;
-        self.ip = self.chunk.?.code.items.ptr;
-        return self.run(allocator);
+    pub fn interpret(_: *VM, _: std.mem.Allocator, source: []const u8) !void {
+        _ = compiler_mod.Scanner.init(source);
     }
 
     fn readByte(self: *VM) u8 {
@@ -111,24 +110,3 @@ pub const VM = struct {
         self.stack.deinit(allocator);
     }
 };
-
-test "addition" {
-    const gpa = std.testing.allocator;
-
-    var vm = VM.init;
-    defer vm.deinit(gpa);
-    var chunk = chunk_mod.Chunk.empty;
-    defer chunk.deinit(gpa);
-
-    var constant = try chunk.addConstant(gpa, .{ .double = 1.2 });
-    try chunk.write(gpa, @intFromEnum(chunk_mod.OpCode.OP_CONSTANT), 123);
-    try chunk.write(gpa, constant, 123);
-    constant = try chunk.addConstant(gpa, .{ .double = 3.4 });
-    try chunk.write(gpa, @intFromEnum(chunk_mod.OpCode.OP_CONSTANT), 123);
-    try chunk.write(gpa, constant, 123);
-    try chunk.write(gpa, @intFromEnum(chunk_mod.OpCode.OP_ADD), 123);
-    try chunk.write(gpa, @intFromEnum(chunk_mod.OpCode.OP_RETURN), 123);
-
-    try vm.interpret(gpa, &chunk);
-    try std.testing.expect(true);
-}

@@ -8,4 +8,5 @@ pub const vm = @import("vm.zig");
 test {
     _ = @import("chunk.zig");
     _ = @import("vm.zig");
+    _ = @import("scanner.zig");
 }
