@@ -50,7 +50,7 @@ pub const TokenType = enum {
 
 pub const Token = struct {
     t: TokenType,
-    start: []const u8,
+    lexeme: []const u8,
     line: usize,
 };
 
@@ -70,10 +70,14 @@ pub const Scanner = struct {
     }
 
     pub fn scanToken(self: *Scanner) Token {
+        self.skipWhitespace();
         self.current = self.index;
 
         if (self.isAtEnd()) return self.makeToken(.TOKEN_EOF);
         const c = self.advance();
+
+        if (isDigit(c)) return self.number();
+
         switch (c) {
             '(' => return self.makeToken(.TOKEN_LEFT_PAREN),
             ')' => return self.makeToken(.TOKEN_RIGHT_PAREN),
@@ -90,6 +94,7 @@ pub const Scanner = struct {
             '=' => return self.makeToken(if (self.match('=')) .TOKEN_EQUAL_EQUAL else .TOKEN_EQUAL),
             '<' => return self.makeToken(if (self.match('=')) .TOKEN_LESS_EQUAL else .TOKEN_LESS),
             '>' => return self.makeToken(if (self.match('=')) .TOKEN_GREATER_EQUAL else .TOKEN_GREATER),
+            '"' => return self.string(),
             else => return self.errorToken("Unexpected character."),
         }
     }
@@ -110,17 +115,85 @@ pub const Scanner = struct {
     fn errorToken(self: *const Scanner, message: []const u8) Token {
         const token = Token{
             .t = .TOKEN_ERROR,
-            .start = message,
+            .lexeme = message,
             .line = self.line,
         };
 
         return token;
     }
 
+    fn skipWhitespace(self: *Scanner) void {
+        while (self.peek()) |c| {
+            switch (c) {
+                ' ', '\r', '\t' => _ = self.advance(),
+                '\n' => {
+                    self.line += 1;
+                    _ = self.advance();
+                },
+                '/' => {
+                    const slash_next = if (self.peekNext()) |next| next == '/' else false;
+                    if (!slash_next) return;
+                    while (self.peek() != null and self.peek().? != '\n') _ = self.advance();
+                },
+                else => return,
+            }
+        }
+    }
+
+    fn peek(self: *Scanner) ?u8 {
+        if (self.isAtEnd()) return null;
+        return self.source[self.index];
+    }
+
+    fn peekNext(self: *Scanner) ?u8 {
+        if (self.isAtEnd()) return null;
+        return self.source[self.index + 1];
+    }
+
+    fn string(self: *Scanner) Token {
+        while (self.peek()) |c| {
+            if (c == '"') break;
+
+            if (c == '\n') self.line += 1;
+
+            _ = self.advance();
+        }
+
+        if (self.isAtEnd()) return self.errorToken("Unterminated string.");
+
+        _ = self.advance();
+        return self.makeToken(.TOKEN_STRING);
+    }
+
+    fn number_helper(self: *Scanner) void {
+        while (self.peek()) |c| {
+            if (isDigit(c)) {
+                _ = self.advance();
+            } else {
+                break;
+            }
+        }
+    }
+
+    fn number(self: *Scanner) Token {
+        self.number_helper();
+
+        if (self.peek()) |c| {
+            if (self.peekNext()) |next| {
+                if (c == '.' and isDigit(next)) {
+                    _ = self.advance();
+                    self.number_helper();
+                }
+            }
+        }
+
+        return self.makeToken(.TOKEN_NUMBER);
+    }
+
     fn makeToken(self: *const Scanner, t: TokenType) Token {
         const token = Token{
             .t = t,
-            .start = self.source[self.current..self.index],
+            .lexeme = self.source[self.current..self.index],
             .line = self.line,
         };
 
@@ -131,6 +204,10 @@ pub const Scanner = struct {
         return self.index >= self.source.len;
     }
 };
+
+fn isDigit(c: u8) bool {
+    return c >= '0' and c <= '9';
+}
 
 test "left paren" {
     var scanner = Scanner.init("(");
@@ -162,4 +239,53 @@ test "equal again then dot" {
 test "eof" {
     var scanner = Scanner.init("");
     try std.testing.expectEqual(scanner.scanToken().t, .TOKEN_EOF);
+}
+
+test "eats whitespace then equal" {
+    var scanner = Scanner.init("  =");
+    try std.testing.expectEqual(.TOKEN_EQUAL, scanner.scanToken().t);
+}
+
+test "eats whitespace then equal then whitespace then bang" {
+    var scanner = Scanner.init("  =\t!");
+    try std.testing.expectEqual(.TOKEN_EQUAL, scanner.scanToken().t);
+    try std.testing.expectEqual(.TOKEN_BANG, scanner.scanToken().t);
+}
+
+test "comment then bang" {
+    var scanner = Scanner.init("// this is a comment\n!");
+    try std.testing.expectEqual(.TOKEN_BANG, scanner.scanToken().t);
+}
+
+test "equal then comment" {
+    var scanner = Scanner.init("=\n//a comment");
+    try std.testing.expectEqual(.TOKEN_EQUAL, scanner.scanToken().t);
+    try std.testing.expectEqual(.TOKEN_EOF, scanner.scanToken().t);
+}
+
+test "a string" {
+    var scanner = Scanner.init("\"a string\"");
+    const token = scanner.scanToken();
+    try std.testing.expectEqual(.TOKEN_STRING, token.t);
+    try std.testing.expectEqualStrings("\"a string\"", token.lexeme);
+}
+
+test "oh no my string" {
+    var scanner = Scanner.init("\"oh no my string");
+    const token = scanner.scanToken();
+    try std.testing.expectEqual(.TOKEN_ERROR, token.t);
+}
+
+test "a number" {
+    var scanner = Scanner.init("10");
+    const token = scanner.scanToken();
+    try std.testing.expectEqual(.TOKEN_NUMBER, token.t);
+    try std.testing.expectEqualStrings("10", token.lexeme);
+}
+
+test "a dotted number" {
+    var scanner = Scanner.init("3.14");
+    const token = scanner.scanToken();
+    try std.testing.expectEqual(.TOKEN_NUMBER, token.t);
+    try std.testing.expectEqualStrings("3.14", token.lexeme);
 }
