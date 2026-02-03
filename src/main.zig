@@ -6,17 +6,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var vm = zlox.vm.VM.init;
-    defer vm.deinit(allocator);
-    var chunk = zlox.chunk.Chunk.empty;
-    defer chunk.deinit(allocator);
-
-    const constant = try chunk.addConstant(allocator, .{ .double = 1.2 });
-    try chunk.write(allocator, @intFromEnum(zlox.chunk.OpCode.OP_CONSTANT), 123);
-    try chunk.write(allocator, constant, 123);
-    try chunk.write(allocator, @intFromEnum(zlox.chunk.OpCode.OP_NEGATE), 123);
-    try chunk.write(allocator, @intFromEnum(zlox.chunk.OpCode.OP_RETURN), 123);
-    try vm.interpret(allocator, &chunk);
+    return repl(allocator);
 }
 
 fn repl(allocator: std.mem.Allocator) !void {
@@ -38,13 +28,17 @@ fn repl(allocator: std.mem.Allocator) !void {
     defer line.deinit();
 
     while (true) {
-        out.print("> ", .{});
+        try out.print("> ", .{});
+        try out.flush();
 
-        in.streamDelimiter(&line.writer, '\n') catch |err| {
-            out.print("\n", .{});
+        _ = in.streamDelimiter(&line.writer, '\n') catch |err| {
+            try out.print("\n", .{});
             if (err == error.EndOfStream) break else return err;
         };
 
+        vm.interpret(allocator, line.written());
+
         in.toss(1);
+        line.clearRetainingCapacity();
     }
 }

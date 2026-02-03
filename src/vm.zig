@@ -31,8 +31,8 @@ pub const VM = struct {
         return self.stack.pop() orelse unreachable;
     }
 
-    pub fn interpret(_: *VM, _: std.mem.Allocator, source: []const u8) !void {
-        _ = compiler_mod.Scanner.init(source);
+    pub fn interpret(_: *VM, _: std.mem.Allocator, source: []const u8) void {
+        compiler_mod.compile(source);
     }
 
     fn readByte(self: *VM) u8 {
