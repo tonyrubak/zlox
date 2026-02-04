@@ -159,7 +159,30 @@ pub const Scanner = struct {
                 break;
             }
         }
-        return self.makeToken(.TOKEN_IDENTIFIER);
+        return self.makeToken(self.identifierType());
+    }
+
+    fn identifierType(self: *Scanner) TokenType {
+        const map = std.StaticStringMap(TokenType).initComptime(.{
+            .{ "and", .TOKEN_AND },
+            .{ "class", .TOKEN_CLASS },
+            .{ "else", .TOKEN_ELSE },
+            .{ "false", .TOKEN_FALSE },
+            .{ "for", .TOKEN_FOR },
+            .{ "fun", .TOKEN_FUN },
+            .{ "if", .TOKEN_IF },
+            .{ "nil", .TOKEN_NIL },
+            .{ "or", .TOKEN_OR },
+            .{ "print", .TOKEN_PRINT },
+            .{ "return", .TOKEN_RETURN },
+            .{ "super", .TOKEN_SUPER },
+            .{ "this", .TOKEN_THIS },
+            .{ "true", .TOKEN_TRUE },
+            .{ "var", .TOKEN_VAR },
+            .{ "while", .TOKEN_WHILE },
+        });
+
+        return map.get(self.source[self.current..self.index]) orelse .TOKEN_IDENTIFIER;
     }
 
     fn string(self: *Scanner) Token {
@@ -305,4 +328,10 @@ test "an identifier" {
     var scanner = Scanner.init("foo");
     const token = scanner.scanToken();
     try std.testing.expectEqual(.TOKEN_IDENTIFIER, token.t);
+}
+
+test "a keyword???" {
+    var scanner = Scanner.init("and");
+    const token = scanner.scanToken();
+    try std.testing.expectEqual(.TOKEN_AND, token.t);
 }
