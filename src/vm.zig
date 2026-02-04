@@ -12,13 +12,13 @@ pub const InterpretError = error{
 
 pub const VM = struct {
     chunk: ?*chunk_mod.Chunk,
-    ip: ?[*]u8,
+    ip: usize,
     stack: std.ArrayList(value_mod.Value),
     trace_execution: bool,
 
     pub const init = VM{
         .chunk = null,
-        .ip = null,
+        .ip = 0,
         .stack = std.ArrayList(value_mod.Value).empty,
         .trace_execution = true,
     };
@@ -31,14 +31,24 @@ pub const VM = struct {
         return self.stack.pop() orelse unreachable;
     }
 
-    pub fn interpret(_: *VM, _: std.mem.Allocator, source: []const u8) void {
-        compiler_mod.compile(source);
+    pub fn interpret(self: *VM, allocator: std.mem.Allocator, source: []const u8) !void {
+        var chunk = chunk_mod.Chunk.empty;
+        defer chunk.deinit(allocator);
+
+        var compiler = compiler_mod.Compiler.init(source, &chunk);
+        if (!compiler.compile()) {
+            return InterpretError.InterpretCompileError;
+        }
+
+        self.chunk = &chunk;
+        self.ip = 0;
+
+        try self.run(allocator);
     }
 
     fn readByte(self: *VM) u8 {
-        if (self.ip == null) unreachable;
-        const result = self.ip.?[0];
-        self.ip.? += 1;
+        const result = self.chunk.?.code.items[self.ip];
+        self.ip += 1;
         return result;
     }
 
@@ -77,7 +87,7 @@ pub const VM = struct {
                     std.debug.print(" ]", .{});
                 }
                 std.debug.print("\n", .{});
-                _ = debug_mod.disassembleInstruction(self.chunk.?, (self.ip.? - self.chunk.?.code.items.ptr));
+                _ = debug_mod.disassembleInstruction(self.chunk.?, self.chunk.?.code.items[0..self.ip]);
             }
             const instruction: chunk_mod.OpCode = @enumFromInt(self.readByte());
             switch (instruction) {
