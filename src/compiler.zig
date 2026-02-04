@@ -25,7 +25,7 @@ pub const Compiler = struct {
     }
 
     pub fn compile(self: *Compiler) bool {
-        _ = self.advance();
+        self.advance();
         //self.expression();
         self.consume(.TOKEN_EOF, "Expected end of expression.");
         return !self.had_error;
@@ -61,7 +61,7 @@ pub const Compiler = struct {
     }
 
     fn emitReturn(self: *Compiler, allocator: std.mem.Allocator) !void {
-        try self.emitByte(allocator, chunk_mod.OpCode.OP_RETURN);
+        try self.emitByte(allocator, @intFromEnum(chunk_mod.OpCode.OP_RETURN));
     }
 
     fn makeConstant(self: *Compiler, allocator: std.mem.Allocator, value: value_mod.Value) !u8 {
@@ -75,8 +75,8 @@ pub const Compiler = struct {
     }
 
     fn emitConstant(self: *Compiler, allocator: std.mem.Allocator, value: value_mod.Value) !void {
-        const constant = try self.makeConstant(value);
-        try self.emitBytes(allocator, chunk_mod.OpCode.OP_CONSTANT, constant);
+        const constant = try self.makeConstant(allocator, value);
+        try self.emitBytes(allocator, @intFromEnum(chunk_mod.OpCode.OP_CONSTANT), constant);
     }
 
     fn endCompiler(self: *Compiler, allocator: std.mem.Allocator) !void {
@@ -93,7 +93,7 @@ pub const Compiler = struct {
     }
 
     fn errorAtPrev(self: *Compiler, message: []const u8) void {
-        errorAt(self.previous, message);
+        self.errorAt(&self.previous, message);
     }
 
     fn errorAt(self: *Compiler, token: *const scanner_mod.Token, message: []const u8) void {
@@ -111,3 +111,43 @@ pub const Compiler = struct {
         self.had_error = true;
     }
 };
+
+test "advance the thing, get a token" {
+    const allocator = std.testing.allocator;
+
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    var compiler = Compiler.init("!", &chunk);
+    compiler.advance();
+
+    try std.testing.expectEqual(.TOKEN_BANG, compiler.current.t);
+}
+
+test "advance the thing twice, get a previous" {
+    const allocator = std.testing.allocator;
+
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    var compiler = Compiler.init("! =", &chunk);
+    compiler.advance();
+    compiler.advance();
+
+    try std.testing.expectEqual(.TOKEN_BANG, compiler.previous.t);
+}
+
+test "write a constant to the chunk pls" {
+    const allocator = std.testing.allocator;
+
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    var compiler = Compiler.init("42", &chunk);
+    compiler.advance();
+    compiler.advance();
+    try compiler.number(allocator);
+    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), compiler.chunk.code.items[0]);
+    try std.testing.expectEqual(0, compiler.chunk.code.items[1]);
+    try std.testing.expectEqual(value_mod.Value{ .double = 42 }, compiler.chunk.constants.items[0]);
+}

@@ -9,4 +9,5 @@ test {
     _ = @import("chunk.zig");
     _ = @import("vm.zig");
     _ = @import("scanner.zig");
+    _ = @import("compiler.zig");
 }
