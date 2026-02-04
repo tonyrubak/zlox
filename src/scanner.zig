@@ -76,7 +76,8 @@ pub const Scanner = struct {
         if (self.isAtEnd()) return self.makeToken(.TOKEN_EOF);
         const c = self.advance();
 
-        if (isDigit(c)) return self.number();
+        if (std.ascii.isDigit(c)) return self.number();
+        if (isAlpha(c)) return self.identifier();
 
         switch (c) {
             '(' => return self.makeToken(.TOKEN_LEFT_PAREN),
@@ -150,6 +151,17 @@ pub const Scanner = struct {
         return self.source[self.index + 1];
     }
 
+    fn identifier(self: *Scanner) Token {
+        while (self.peek()) |c| {
+            if (isAlpha(c) or std.ascii.isDigit(c)) {
+                _ = self.advance();
+            } else {
+                break;
+            }
+        }
+        return self.makeToken(.TOKEN_IDENTIFIER);
+    }
+
     fn string(self: *Scanner) Token {
         while (self.peek()) |c| {
             if (c == '"') break;
@@ -167,7 +179,7 @@ pub const Scanner = struct {
 
     fn number_helper(self: *Scanner) void {
         while (self.peek()) |c| {
-            if (isDigit(c)) {
+            if (std.ascii.isDigit(c)) {
                 _ = self.advance();
             } else {
                 break;
@@ -178,13 +190,12 @@ pub const Scanner = struct {
     fn number(self: *Scanner) Token {
         self.number_helper();
 
-        if (self.peek()) |c| {
-            if (self.peekNext()) |next| {
-                if (c == '.' and isDigit(next)) {
-                    _ = self.advance();
-                    self.number_helper();
-                }
-            }
+        const c = self.peek() orelse return self.makeToken(.TOKEN_NUMBER);
+        const next = self.peekNext() orelse return self.makeToken(.TOKEN_NUMBER);
+
+        if (c == '.' and std.ascii.isDigit(next)) {
+            _ = self.advance();
+            self.number_helper();
         }
 
         return self.makeToken(.TOKEN_NUMBER);
@@ -205,8 +216,8 @@ pub const Scanner = struct {
     }
 };
 
-fn isDigit(c: u8) bool {
-    return c >= '0' and c <= '9';
+fn isAlpha(c: u8) bool {
+    return std.ascii.isAlphabetic(c) or c == '_';
 }
 
 test "left paren" {
@@ -288,4 +299,10 @@ test "a dotted number" {
     const token = scanner.scanToken();
     try std.testing.expectEqual(.TOKEN_NUMBER, token.t);
     try std.testing.expectEqualStrings("3.14", token.lexeme);
+}
+
+test "an identifier" {
+    var scanner = Scanner.init("foo");
+    const token = scanner.scanToken();
+    try std.testing.expectEqual(.TOKEN_IDENTIFIER, token.t);
 }
