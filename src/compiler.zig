@@ -3,6 +3,53 @@ const chunk_mod = @import("chunk.zig");
 const scanner_mod = @import("scanner.zig");
 const value_mod = @import("value.zig");
 
+const Precedence = enum(u8) { None, Assignment, Or, And, Equality, Comparison, Term, Factor, Unary, Call, Primary };
+
+fn nextPrecedence(prec: Precedence) Precedence {
+    return @enumFromInt(@intFromEnum(prec) + 1);
+}
+
+fn precedenceLessOrEqual(a: Precedence, b: Precedence) bool {
+    return @intFromEnum(a) <= @intFromEnum(b);
+}
+
+const ParseFn = *const fn (self: *Compiler, allocator: std.mem.Allocator) anyerror!void;
+
+const ParseRule = struct {
+    prefix: ?ParseFn,
+    infix: ?ParseFn,
+    precedence: Precedence,
+};
+
+fn getRule(token_type: scanner_mod.TokenType) ParseRule {
+    return switch (token_type) {
+        .TOKEN_LEFT_PAREN => .{ .prefix = Compiler.grouping, .infix = null, .precedence = .None },
+        .TOKEN_RIGHT_PAREN => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_LEFT_BRACE => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_RIGHT_BRACE => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_COMMA => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_DOT => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_MINUS => .{ .prefix = Compiler.unary, .infix = Compiler.binary, .precedence = .Term },
+        .TOKEN_PLUS => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Term },
+        .TOKEN_SEMICOLON => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_SLASH => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Factor },
+        .TOKEN_STAR => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Factor },
+        .TOKEN_BANG => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_BANG_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_EQUAL_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_GREATER => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_GREATER_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_LESS => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_LESS_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_IDENTIFIER => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_STRING => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_NUMBER => .{ .prefix = Compiler.number, .infix = null, .precedence = .None },
+        .TOKEN_AND => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_CLASS => .{ .prefix = null, .infix = null, .precedence = .None },
+        else => .{ .prefix = null, .infix = null, .precedence = .None },
+    };
+}
 pub const Compiler = struct {
     current: scanner_mod.Token,
     previous: scanner_mod.Token,
@@ -26,7 +73,7 @@ pub const Compiler = struct {
 
     pub fn compile(self: *Compiler, allocator: std.mem.Allocator) bool {
         self.advance();
-        //self.expression();
+        self.expression(allocator) catch @panic("Error allocating memory during parsing");
         self.consume(.TOKEN_EOF, "Expected end of expression.");
         self.endCompiler(allocator) catch @panic("Could not write EOF to chunk");
         return !self.had_error;
@@ -84,9 +131,60 @@ pub const Compiler = struct {
         try self.emitReturn(allocator);
     }
 
+    fn binary(self: *Compiler, allocator: std.mem.Allocator) !void {
+        const operator_type = self.previous.t;
+        const rule = getRule(operator_type);
+        try self.parsePrecedence(allocator, nextPrecedence(rule.precedence));
+
+        const opcode: chunk_mod.OpCode = switch (operator_type) {
+            .TOKEN_PLUS => .OP_ADD,
+            .TOKEN_MINUS => .OP_SUBTRACT,
+            .TOKEN_STAR => .OP_MULTIPLY,
+            .TOKEN_SLASH => .OP_DIVIDE,
+            else => unreachable,
+        };
+
+        try self.emitByte(allocator, @intFromEnum(opcode));
+    }
+
+    fn expression(self: *Compiler, allocator: std.mem.Allocator) !void {
+        try self.parsePrecedence(allocator, .Assignment);
+    }
+    fn grouping(self: *Compiler, allocator: std.mem.Allocator) !void {
+        try self.expression(allocator);
+        self.consume(.TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
+    }
+
     fn number(self: *Compiler, allocator: std.mem.Allocator) !void {
         const value = try std.fmt.parseFloat(f64, self.previous.lexeme);
         try self.emitConstant(allocator, .{ .double = value });
+    }
+
+    fn unary(self: *Compiler, allocator: std.mem.Allocator) !void {
+        const operator_type = self.previous.t;
+
+        try self.parsePrecedence(allocator, .Unary);
+
+        switch (operator_type) {
+            .TOKEN_MINUS => try self.emitByte(allocator, @intFromEnum(chunk_mod.OpCode.OP_NEGATE)),
+            else => unreachable,
+        }
+    }
+
+    fn parsePrecedence(self: *Compiler, allocator: std.mem.Allocator, precedence: Precedence) !void {
+        self.advance();
+        const prefixRule = getRule(self.previous.t).prefix orelse {
+            self.errorAtPrev("Expect expression.");
+            return;
+        };
+
+        try prefixRule(self, allocator);
+
+        while (precedenceLessOrEqual(precedence, getRule(self.current.t).precedence)) {
+            self.advance();
+            const infixRule = getRule(self.previous.t).infix orelse unreachable;
+            try infixRule(self, allocator);
+        }
     }
 
     fn errorAtCurrent(self: *Compiler, message: []const u8) void {
@@ -154,4 +252,40 @@ test "write a constant to the chunk pls" {
     try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), chunk.code.items[0]);
     try std.testing.expectEqual(0, chunk.code.items[1]);
     try std.testing.expectEqual(value_mod.Value{ .double = 42 }, chunk.constants.items[0]);
+}
+
+test "infix addition" {
+    const allocator = std.testing.allocator;
+
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    {
+        var compiler = Compiler.init("2 + 3", &chunk);
+        compiler.advance();
+        try compiler.expression(allocator);
+    }
+
+    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), chunk.code.items[0]);
+    try std.testing.expectEqual(0, chunk.code.items[1]);
+    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), chunk.code.items[2]);
+    try std.testing.expectEqual(1, chunk.code.items[3]);
+    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_ADD), chunk.code.items[4]);
+}
+
+test "unary negation" {
+    const allocator = std.testing.allocator;
+
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    {
+        var compiler = Compiler.init("-2", &chunk);
+        compiler.advance();
+        try compiler.expression(allocator);
+    }
+
+    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), chunk.code.items[0]);
+    try std.testing.expectEqual(0, chunk.code.items[1]);
+    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_NEGATE), chunk.code.items[2]);
 }
