@@ -24,10 +24,11 @@ pub const Compiler = struct {
         return result;
     }
 
-    pub fn compile(self: *Compiler) bool {
+    pub fn compile(self: *Compiler, allocator: std.mem.Allocator) bool {
         self.advance();
         //self.expression();
         self.consume(.TOKEN_EOF, "Expected end of expression.");
+        self.endCompiler(allocator) catch @panic("Could not write EOF to chunk");
         return !self.had_error;
     }
 
@@ -143,11 +144,14 @@ test "write a constant to the chunk pls" {
     var chunk = chunk_mod.Chunk.empty;
     defer chunk.deinit(allocator);
 
-    var compiler = Compiler.init("42", &chunk);
-    compiler.advance();
-    compiler.advance();
-    try compiler.number(allocator);
-    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), compiler.chunk.code.items[0]);
-    try std.testing.expectEqual(0, compiler.chunk.code.items[1]);
-    try std.testing.expectEqual(value_mod.Value{ .double = 42 }, compiler.chunk.constants.items[0]);
+    {
+        var compiler = Compiler.init("42", &chunk);
+        compiler.advance();
+        compiler.advance();
+        try compiler.number(allocator);
+    }
+
+    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), chunk.code.items[0]);
+    try std.testing.expectEqual(0, chunk.code.items[1]);
+    try std.testing.expectEqual(value_mod.Value{ .double = 42 }, chunk.constants.items[0]);
 }
