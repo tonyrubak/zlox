@@ -34,7 +34,7 @@ fn getRule(token_type: scanner_mod.TokenType) ParseRule {
         .TOKEN_SEMICOLON => .{ .prefix = null, .infix = null, .precedence = .None },
         .TOKEN_SLASH => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Factor },
         .TOKEN_STAR => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Factor },
-        .TOKEN_BANG => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_BANG => .{ .prefix = Compiler.unary, .infix = null, .precedence = .None },
         .TOKEN_BANG_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
         .TOKEN_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
         .TOKEN_EQUAL_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
@@ -47,6 +47,9 @@ fn getRule(token_type: scanner_mod.TokenType) ParseRule {
         .TOKEN_NUMBER => .{ .prefix = Compiler.number, .infix = null, .precedence = .None },
         .TOKEN_AND => .{ .prefix = null, .infix = null, .precedence = .None },
         .TOKEN_CLASS => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_FALSE => .{ .prefix = Compiler.literal, .infix = null, .precedence = .None },
+        .TOKEN_TRUE => .{ .prefix = Compiler.literal, .infix = null, .precedence = .None },
+        .TOKEN_NIL => .{ .prefix = Compiler.literal, .infix = null, .precedence = .None },
         else => .{ .prefix = null, .infix = null, .precedence = .None },
     };
 }
@@ -147,6 +150,17 @@ pub const Compiler = struct {
         try self.emitByte(allocator, @intFromEnum(opcode));
     }
 
+    fn literal(self: *Compiler, allocator: std.mem.Allocator) !void {
+        const opcode: chunk_mod.OpCode = switch (self.previous.t) {
+            .TOKEN_FALSE => .OP_FALSE,
+            .TOKEN_NIL => .OP_NIL,
+            .TOKEN_TRUE => .OP_TRUE,
+            else => unreachable,
+        };
+
+        try self.emitByte(allocator, @intFromEnum(opcode));
+    }
+
     fn expression(self: *Compiler, allocator: std.mem.Allocator) !void {
         try self.parsePrecedence(allocator, .Assignment);
     }
@@ -165,10 +179,13 @@ pub const Compiler = struct {
 
         try self.parsePrecedence(allocator, .Unary);
 
-        switch (operator_type) {
-            .TOKEN_MINUS => try self.emitByte(allocator, @intFromEnum(chunk_mod.OpCode.OP_NEGATE)),
+        const opcode: chunk_mod.OpCode = switch (operator_type) {
+            .TOKEN_BANG => .OP_NOT,
+            .TOKEN_MINUS => .OP_NEGATE,
             else => unreachable,
-        }
+        };
+
+        try self.emitByte(allocator, @intFromEnum(opcode));
     }
 
     fn parsePrecedence(self: *Compiler, allocator: std.mem.Allocator, precedence: Precedence) !void {
