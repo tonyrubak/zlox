@@ -60,7 +60,7 @@ pub const VM = struct {
         var chunk = Chunk.empty;
         defer chunk.deinit(allocator);
 
-        var compiler = Compiler.init(source, &chunk, &self.objects);
+        var compiler = Compiler.init(source, &chunk, &self.objects, &self.strings);
         if (!compiler.compile(allocator)) {
             return InterpretError.InterpretCompileError;
         }
@@ -68,7 +68,7 @@ pub const VM = struct {
         self.chunk = &chunk;
         self.ip = 0;
 
-        self.run(allocator);
+        try self.run(allocator);
     }
 
     fn introspectInterpret(self: *VM, allocator: std.mem.Allocator, source: []const u8, chunk: *Chunk) !void {
@@ -141,7 +141,7 @@ pub const VM = struct {
         try self.push(allocator, Value{ .object = str.asObj() });
     }
 
-    pub fn step(self: *VM, allocator: std.mem.Allocator) !void {
+    pub fn step(self: *VM, allocator: std.mem.Allocator) !bool {
         if (comptime build_options.trace) {
             std.debug.print("          ", .{});
             for (self.stack.items) |item| {
@@ -158,7 +158,7 @@ pub const VM = struct {
                 const value = self.pop();
                 value.print();
                 std.debug.print("\n", .{});
-                return;
+                return false;
             },
             .OP_CONSTANT => {
                 const constant = self.readConstant();
@@ -211,11 +211,13 @@ pub const VM = struct {
                 try self.push(allocator, Value{ .bool = a < b });
             },
         }
+        return true;
     }
 
     pub fn run(self: *VM, allocator: std.mem.Allocator) !void {
-        while (true) {
-            self.step(allocator);
+        var cont = true;
+        while (cont) {
+            cont = self.step(allocator) catch false;
         }
     }
 
