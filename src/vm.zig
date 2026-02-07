@@ -34,6 +34,10 @@ pub const VM = struct {
         return self.stack.pop() orelse unreachable;
     }
 
+    fn peek(self: *VM, back: usize) value_mod.Value {
+        return self.stack.items[self.stack.items.len - back - 1];
+    }
+
     fn runtimeError(self: *VM, comptime fmt: []const u8, args: anytype) void {
         std.debug.print(fmt, args);
         std.debug.print("\n", .{});
@@ -111,6 +115,17 @@ pub const VM = struct {
         };
     }
 
+    fn concatenate(self: *VM, allocator: std.mem.Allocator) !void {
+        const a: *object_mod.ObjString = @ptrCast(@alignCast(self.pop().object));
+        const b: *object_mod.ObjString = @ptrCast(@alignCast(self.pop().object));
+
+        const str = try allocator.create(object_mod.ObjString);
+        const chars = try std.mem.concat(allocator, u8, &[_][]const u8{ b.chars[0..b.length], a.chars[0..a.length] });
+        str.* = object_mod.ObjString{ .chars = chars.ptr, .length = chars.len, .obj = object_mod.Obj{ .obj_type = .String } };
+        try self.objects.append(allocator, str.asObj());
+        try self.push(allocator, value_mod.Value{ .object = str.asObj() });
+    }
+
     pub fn step(self: *VM, allocator: std.mem.Allocator) !void {
         if (comptime build_options.trace) {
             std.debug.print("          ", .{});
@@ -148,7 +163,19 @@ pub const VM = struct {
                 };
                 try self.push(allocator, result);
             },
-            .OP_ADD => try self.binaryOp(allocator, add),
+            .OP_ADD => {
+                const top = self.peek(0);
+                const next = self.peek(1);
+
+                if (top.isObjType(.String) and next.isObjType(.String)) {
+                    try self.concatenate(allocator);
+                } else if (top.isNumber() and next.isNumber()) {
+                    try self.binaryOp(allocator, add);
+                } else {
+                    self.runtimeError("Operands must be two numbers or two strings", .{});
+                    return InterpretError.InterpretRuntimeError;
+                }
+            },
             .OP_SUBTRACT => try self.binaryOp(allocator, sub),
             .OP_MULTIPLY => try self.binaryOp(allocator, mul),
             .OP_DIVIDE => try self.binaryOp(allocator, div),
@@ -314,4 +341,21 @@ test "!5 is false" {
     try vm.step(allocator);
     try vm.step(allocator);
     try std.testing.expectEqual(false, vm.stack.items[0].bool);
+}
+
+test "concatenate two strings" {
+    const allocator = std.testing.allocator;
+
+    var vm = VM.init;
+    defer vm.deinit(allocator);
+
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    try vm.introspectInterpret(allocator, "\"hello \" + \"world\"", &chunk);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    const top: *object_mod.ObjString = @ptrCast(@alignCast(vm.stack.items[0].object));
+    try std.testing.expectEqualStrings("hello world", top.chars[0..top.length]);
 }

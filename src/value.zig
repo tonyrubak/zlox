@@ -23,4 +23,18 @@ pub const Value = union(enum) {
             else => false,
         };
     }
+
+    pub fn isObjType(self: Value, object_type: object_mod.ObjType) bool {
+        return switch (self) {
+            .object => |obj| return obj.obj_type == object_type,
+            else => false,
+        };
+    }
+
+    pub fn isNumber(self: Value) bool {
+        return switch (self) {
+            .double => true,
+            else => false,
+        };
+    }
 };
