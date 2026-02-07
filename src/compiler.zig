@@ -36,14 +36,14 @@ fn getRule(token_type: scanner_mod.TokenType) ParseRule {
         .TOKEN_SLASH => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Factor },
         .TOKEN_STAR => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Factor },
         .TOKEN_BANG => .{ .prefix = Compiler.unary, .infix = null, .precedence = .None },
-        .TOKEN_BANG_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_BANG_EQUAL => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Equality },
         .TOKEN_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
-        .TOKEN_EQUAL_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
-        .TOKEN_GREATER => .{ .prefix = null, .infix = null, .precedence = .None },
-        .TOKEN_GREATER_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
-        .TOKEN_LESS => .{ .prefix = null, .infix = null, .precedence = .None },
-        .TOKEN_LESS_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
-        .TOKEN_IDENTIFIER => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_EQUAL_EQUAL => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Equality },
+        .TOKEN_GREATER => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Comparison },
+        .TOKEN_GREATER_EQUAL => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Comparison },
+        .TOKEN_LESS => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Comparison },
+        .TOKEN_LESS_EQUAL => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Comparison },
+        .TOKEN_IDENTIFIER => .{ .prefix = null, .infix = Compiler.binary, .precedence = .Comparison },
         .TOKEN_STRING => .{ .prefix = Compiler.string, .infix = null, .precedence = .None },
         .TOKEN_NUMBER => .{ .prefix = Compiler.number, .infix = null, .precedence = .None },
         .TOKEN_AND => .{ .prefix = null, .infix = null, .precedence = .None },
@@ -62,8 +62,9 @@ pub const Compiler = struct {
     panic_mode: bool,
     chunk: *chunk_mod.Chunk,
     objects: *std.ArrayList(*object_mod.Obj),
+    strings: *std.StringHashMapUnmanaged([*]const u8),
 
-    pub fn init(source: []const u8, chunk: *chunk_mod.Chunk, objects: *std.ArrayList(*object_mod.Obj)) Compiler {
+    pub fn init(source: []const u8, chunk: *chunk_mod.Chunk, objects: *std.ArrayList(*object_mod.Obj), strings: *std.StringHashMapUnmanaged([*]const u8)) Compiler {
         const result = Compiler{
             .current = undefined,
             .previous = undefined,
@@ -72,6 +73,7 @@ pub const Compiler = struct {
             .panic_mode = false,
             .chunk = chunk,
             .objects = objects,
+            .strings = strings,
         };
 
         return result;
@@ -133,6 +135,14 @@ pub const Compiler = struct {
         try self.emitBytes(allocator, @intFromEnum(chunk_mod.OpCode.OP_CONSTANT), constant);
     }
 
+    fn emitOp(self: *Compiler, allocator: std.mem.Allocator, opcode: chunk_mod.OpCode) !void {
+        try self.emitByte(allocator, @intFromEnum(opcode));
+    }
+
+    fn emitOps(self: *Compiler, allocator: std.mem.Allocator, op1: chunk_mod.OpCode, op2: chunk_mod.OpCode) !void {
+        try self.emitBytes(allocator, @intFromEnum(op1), @intFromEnum(op2));
+    }
+
     fn endCompiler(self: *Compiler, allocator: std.mem.Allocator) !void {
         try self.emitReturn(allocator);
     }
@@ -142,15 +152,19 @@ pub const Compiler = struct {
         const rule = getRule(operator_type);
         try self.parsePrecedence(allocator, nextPrecedence(rule.precedence));
 
-        const opcode: chunk_mod.OpCode = switch (operator_type) {
-            .TOKEN_PLUS => .OP_ADD,
-            .TOKEN_MINUS => .OP_SUBTRACT,
-            .TOKEN_STAR => .OP_MULTIPLY,
-            .TOKEN_SLASH => .OP_DIVIDE,
+        try switch (operator_type) {
+            .TOKEN_PLUS => self.emitOp(allocator, .OP_ADD),
+            .TOKEN_MINUS => self.emitOp(allocator, .OP_SUBTRACT),
+            .TOKEN_STAR => self.emitOp(allocator, .OP_MULTIPLY),
+            .TOKEN_SLASH => self.emitOp(allocator, .OP_DIVIDE),
+            .TOKEN_BANG_EQUAL => self.emitOps(allocator, .OP_EQUAL, .OP_NOT),
+            .TOKEN_EQUAL_EQUAL => self.emitOp(allocator, .OP_EQUAL),
+            .TOKEN_GREATER => self.emitOp(allocator, .OP_GREATER),
+            .TOKEN_GREATER_EQUAL => self.emitOps(allocator, .OP_LESS, .OP_NOT),
+            .TOKEN_LESS => self.emitOp(allocator, .OP_LESS),
+            .TOKEN_LESS_EQUAL => self.emitOps(allocator, .OP_GREATER, .OP_NOT),
             else => unreachable,
         };
-
-        try self.emitByte(allocator, @intFromEnum(opcode));
     }
 
     fn literal(self: *Compiler, allocator: std.mem.Allocator) !void {
@@ -180,9 +194,10 @@ pub const Compiler = struct {
     fn string(self: *Compiler, allocator: std.mem.Allocator) !void {
         const len = self.previous.lexeme.len;
         const str = self.previous.lexeme[1 .. len - 1];
-        const ptr = try allocator.dupe(u8, str);
+        const ptr = self.strings.get(str) orelse (try allocator.dupe(u8, str)).ptr;
+        try self.strings.put(allocator, str, ptr);
         var obj = try allocator.create(object_mod.ObjString);
-        obj.* = object_mod.ObjString{ .chars = ptr.ptr, .length = ptr.len, .obj = object_mod.Obj{ .obj_type = .String } };
+        obj.* = object_mod.ObjString{ .chars = ptr, .length = str.len, .obj = object_mod.Obj{ .obj_type = .String } };
         try self.objects.append(allocator, obj.asObj());
         try self.emitConstant(allocator, .{ .object = obj.asObj() });
     }
@@ -250,7 +265,10 @@ test "advance the thing, get a token" {
     var objects = std.ArrayList(*object_mod.Obj).empty;
     defer objects.deinit(allocator);
 
-    var compiler = Compiler.init("!", &chunk, &objects);
+    var strings = std.StringHashMapUnmanaged([*]const u8).empty;
+    defer strings.deinit(allocator);
+
+    var compiler = Compiler.init("!", &chunk, &objects, &strings);
     compiler.advance();
 
     try std.testing.expectEqual(.TOKEN_BANG, compiler.current.t);
@@ -265,7 +283,10 @@ test "advance the thing twice, get a previous" {
     var objects = std.ArrayList(*object_mod.Obj).empty;
     defer objects.deinit(allocator);
 
-    var compiler = Compiler.init("! =", &chunk, &objects);
+    var strings = std.StringHashMapUnmanaged([*]const u8).empty;
+    defer strings.deinit(allocator);
+
+    var compiler = Compiler.init("! =", &chunk, &objects, &strings);
     compiler.advance();
     compiler.advance();
 
@@ -281,8 +302,11 @@ test "write a constant to the chunk pls" {
     var objects = std.ArrayList(*object_mod.Obj).empty;
     defer objects.deinit(allocator);
 
+    var strings = std.StringHashMapUnmanaged([*]const u8).empty;
+    defer strings.deinit(allocator);
+
     {
-        var compiler = Compiler.init("42", &chunk, &objects);
+        var compiler = Compiler.init("42", &chunk, &objects, &strings);
         compiler.advance();
         compiler.advance();
         try compiler.number(allocator);
@@ -305,8 +329,18 @@ test "write a string to the chunk pls" {
         objects.deinit(allocator);
     }
 
+    var strings = std.StringHashMapUnmanaged([*]const u8).empty;
+    defer {
+        var it = strings.iterator();
+        while (it.next()) |entry| {
+            const slice = entry.value_ptr.*[0..entry.key_ptr.len];
+            allocator.free(slice);
+        }
+        strings.deinit(allocator);
+    }
+
     {
-        var compiler = Compiler.init("\"foo\"", &chunk, &objects);
+        var compiler = Compiler.init("\"foo\"", &chunk, &objects, &strings);
         compiler.advance();
         compiler.advance();
         try compiler.string(allocator);
@@ -324,8 +358,11 @@ test "infix addition" {
     var objects = std.ArrayList(*object_mod.Obj).empty;
     defer objects.deinit(allocator);
 
+    var strings = std.StringHashMapUnmanaged([*]const u8).empty;
+    defer strings.deinit(allocator);
+
     {
-        var compiler = Compiler.init("2 + 3", &chunk, &objects);
+        var compiler = Compiler.init("2 + 3", &chunk, &objects, &strings);
         compiler.advance();
         try compiler.expression(allocator);
     }
@@ -346,8 +383,11 @@ test "unary negation" {
     var objects = std.ArrayList(*object_mod.Obj).empty;
     defer objects.deinit(allocator);
 
+    var strings = std.StringHashMapUnmanaged([*]const u8).empty;
+    defer strings.deinit(allocator);
+
     {
-        var compiler = Compiler.init("-2", &chunk, &objects);
+        var compiler = Compiler.init("-2", &chunk, &objects, &strings);
         compiler.advance();
         try compiler.expression(allocator);
     }

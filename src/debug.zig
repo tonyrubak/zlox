@@ -32,6 +32,9 @@ pub fn disassembleInstruction(c: *chunk_mod.Chunk, offset: usize) usize {
         .OP_FALSE => return simpleInstruction("OP_FALSE", offset),
         .OP_TRUE => return simpleInstruction("OP_TRUE", offset),
         .OP_NOT => return simpleInstruction("OP_NOT", offset),
+        .OP_EQUAL => return simpleInstruction("OP_EQUAL", offset),
+        .OP_GREATER => return simpleInstruction("OP_GREATER", offset),
+        .OP_LESS => return simpleInstruction("OP_LESS", offset),
     }
 }
 

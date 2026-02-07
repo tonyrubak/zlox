@@ -17,6 +17,7 @@ pub const VM = struct {
     stack: std.ArrayList(value_mod.Value),
     trace_execution: bool,
     objects: std.ArrayList(*object_mod.Obj),
+    strings: std.StringHashMapUnmanaged([*]const u8),
 
     pub const init = VM{
         .chunk = null,
@@ -24,6 +25,7 @@ pub const VM = struct {
         .stack = .empty,
         .trace_execution = true,
         .objects = .empty,
+        .strings = .empty,
     };
 
     fn push(self: *VM, allocator: std.mem.Allocator, value: value_mod.Value) !void {
@@ -64,7 +66,7 @@ pub const VM = struct {
     }
 
     fn introspectInterpret(self: *VM, allocator: std.mem.Allocator, source: []const u8, chunk: *chunk_mod.Chunk) !void {
-        var compiler = compiler_mod.Compiler.init(source, chunk, &self.objects);
+        var compiler = compiler_mod.Compiler.init(source, chunk, &self.objects, &self.strings);
 
         if (!compiler.compile(allocator)) {
             return InterpretError.InterpretCompileError;
@@ -121,7 +123,14 @@ pub const VM = struct {
 
         const str = try allocator.create(object_mod.ObjString);
         const chars = try std.mem.concat(allocator, u8, &[_][]const u8{ b.chars[0..b.length], a.chars[0..a.length] });
-        str.* = object_mod.ObjString{ .chars = chars.ptr, .length = chars.len, .obj = object_mod.Obj{ .obj_type = .String } };
+        const interned = self.strings.get(chars);
+        if (interned) |ptr| {
+            str.* = object_mod.ObjString{ .chars = ptr, .length = chars.len, .obj = object_mod.Obj{ .obj_type = .String } };
+            allocator.free(chars);
+        } else {
+            str.* = object_mod.ObjString{ .chars = chars.ptr, .length = chars.len, .obj = object_mod.Obj{ .obj_type = .String } };
+            try self.strings.put(allocator, chars, chars.ptr);
+        }
         try self.objects.append(allocator, str.asObj());
         try self.push(allocator, value_mod.Value{ .object = str.asObj() });
     }
@@ -180,6 +189,21 @@ pub const VM = struct {
             .OP_MULTIPLY => try self.binaryOp(allocator, mul),
             .OP_DIVIDE => try self.binaryOp(allocator, div),
             .OP_NOT => try self.push(allocator, value_mod.Value{ .bool = self.pop().isFalsish() }),
+            .OP_EQUAL => {
+                const b = self.pop();
+                const a = self.pop();
+                try self.push(allocator, value_mod.Value{ .bool = a.isEqual(b) });
+            },
+            .OP_GREATER => {
+                const b = try self.ensureNumber(self.pop());
+                const a = try self.ensureNumber(self.pop());
+                try self.push(allocator, value_mod.Value{ .bool = a > b });
+            },
+            .OP_LESS => {
+                const b = try self.ensureNumber(self.pop());
+                const a = try self.ensureNumber(self.pop());
+                try self.push(allocator, value_mod.Value{ .bool = a < b });
+            },
         }
     }
 
@@ -194,6 +218,12 @@ pub const VM = struct {
         for (self.objects.items) |object| {
             object.deinit(allocator);
         }
+        var string_iterator = self.strings.iterator();
+        while (string_iterator.next()) |entry| {
+            const slice = entry.value_ptr.*[0..entry.key_ptr.len];
+            allocator.free(slice);
+        }
+        self.strings.deinit(allocator);
         self.objects.deinit(allocator);
     }
 };
@@ -358,4 +388,90 @@ test "concatenate two strings" {
     try vm.step(allocator);
     const top: *object_mod.ObjString = @ptrCast(@alignCast(vm.stack.items[0].object));
     try std.testing.expectEqualStrings("hello world", top.chars[0..top.length]);
+}
+
+test "what if two same strings" {
+    const allocator = std.testing.allocator;
+
+    var vm = VM.init;
+    defer vm.deinit(allocator);
+
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    try vm.introspectInterpret(allocator, "\"hello\" + \"hello\"", &chunk);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    const top = vm.stack.items[0].object.asObjString();
+    try std.testing.expectEqualStrings("hellohello", top.chars[0..top.length]);
+}
+
+test "5 == 5" {
+    const allocator = std.testing.allocator;
+
+    var vm = VM.init;
+    defer vm.deinit(allocator);
+
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    try vm.introspectInterpret(allocator, "5 == 5", &chunk);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    const top = vm.stack.items[0].bool;
+    try std.testing.expect(top);
+}
+
+test "6 != 5" {
+    const allocator = std.testing.allocator;
+
+    var vm = VM.init;
+    defer vm.deinit(allocator);
+
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    try vm.introspectInterpret(allocator, "6 != 5", &chunk);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    const top = vm.stack.items[0].bool;
+    try std.testing.expect(top);
+}
+
+test "6 > 5" {
+    const allocator = std.testing.allocator;
+
+    var vm = VM.init;
+    defer vm.deinit(allocator);
+
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    try vm.introspectInterpret(allocator, "6 > 5", &chunk);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    const top = vm.stack.items[0].bool;
+    try std.testing.expect(top);
+}
+
+test "string not equal 5" {
+    const allocator = std.testing.allocator;
+
+    var vm = VM.init;
+    defer vm.deinit(allocator);
+
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    try vm.introspectInterpret(allocator, "\"hello\" == 5", &chunk);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    try vm.step(allocator);
+    const top = vm.stack.items[0].bool;
+    try std.testing.expect(!top);
 }

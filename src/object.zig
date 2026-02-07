@@ -10,12 +10,16 @@ pub const Obj = extern struct {
     pub fn deinit(self: *Obj, allocator: std.mem.Allocator) void {
         switch (self.obj_type) {
             .String => {
-                const inner: *ObjString = @ptrCast(@alignCast(self));
-                const slice = inner.chars[0..inner.length];
-                allocator.free(slice);
+                const inner = self.asObjString();
                 allocator.destroy(inner);
             },
         }
+    }
+
+    pub fn asObjString(self: *Obj) *ObjString {
+        return switch (self.obj_type) {
+            .String => @ptrCast(@alignCast(self)),
+        };
     }
 };
 
