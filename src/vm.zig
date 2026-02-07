@@ -1,10 +1,16 @@
 const build_options = @import("build_options");
 const std = @import("std");
 const chunk_mod = @import("chunk.zig");
+const Chunk = chunk_mod.Chunk;
+const OpCode = chunk_mod.OpCode;
 const value_mod = @import("value.zig");
+const Value = value_mod.Value;
 const debug_mod = @import("debug.zig");
 const compiler_mod = @import("compiler.zig");
+const Compiler = compiler_mod.Compiler;
 const object_mod = @import("object.zig");
+const Obj = object_mod.Obj;
+const ObjString = object_mod.ObjString;
 
 pub const InterpretError = error{
     InterpretCompileError,
@@ -12,11 +18,11 @@ pub const InterpretError = error{
 };
 
 pub const VM = struct {
-    chunk: ?*chunk_mod.Chunk,
+    chunk: ?*Chunk,
     ip: usize,
-    stack: std.ArrayList(value_mod.Value),
+    stack: std.ArrayList(Value),
     trace_execution: bool,
-    objects: std.ArrayList(*object_mod.Obj),
+    objects: std.ArrayList(*Obj),
     strings: std.StringHashMapUnmanaged([*]const u8),
 
     pub const init = VM{
@@ -28,15 +34,15 @@ pub const VM = struct {
         .strings = .empty,
     };
 
-    fn push(self: *VM, allocator: std.mem.Allocator, value: value_mod.Value) !void {
+    fn push(self: *VM, allocator: std.mem.Allocator, value: Value) !void {
         try self.stack.append(allocator, value);
     }
 
-    fn pop(self: *VM) value_mod.Value {
+    fn pop(self: *VM) Value {
         return self.stack.pop() orelse unreachable;
     }
 
-    fn peek(self: *VM, back: usize) value_mod.Value {
+    fn peek(self: *VM, back: usize) Value {
         return self.stack.items[self.stack.items.len - back - 1];
     }
 
@@ -51,10 +57,10 @@ pub const VM = struct {
     }
 
     pub fn interpret(self: *VM, allocator: std.mem.Allocator, source: []const u8) !void {
-        var chunk = chunk_mod.Chunk.empty;
+        var chunk = Chunk.empty;
         defer chunk.deinit(allocator);
 
-        var compiler = compiler_mod.Compiler.init(source, &chunk, &self.objects);
+        var compiler = Compiler.init(source, &chunk, &self.objects);
         if (!compiler.compile(allocator)) {
             return InterpretError.InterpretCompileError;
         }
@@ -65,8 +71,8 @@ pub const VM = struct {
         self.run(allocator);
     }
 
-    fn introspectInterpret(self: *VM, allocator: std.mem.Allocator, source: []const u8, chunk: *chunk_mod.Chunk) !void {
-        var compiler = compiler_mod.Compiler.init(source, chunk, &self.objects, &self.strings);
+    fn introspectInterpret(self: *VM, allocator: std.mem.Allocator, source: []const u8, chunk: *Chunk) !void {
+        var compiler = Compiler.init(source, chunk, &self.objects, &self.strings);
 
         if (!compiler.compile(allocator)) {
             return InterpretError.InterpretCompileError;
@@ -82,7 +88,7 @@ pub const VM = struct {
         return result;
     }
 
-    fn readConstant(self: *VM) value_mod.Value {
+    fn readConstant(self: *VM) Value {
         const offset = self.readByte();
         return self.chunk.?.constants.items[offset];
     }
@@ -103,11 +109,11 @@ pub const VM = struct {
     fn binaryOp(self: *VM, allocator: std.mem.Allocator, comptime op: fn (f64, f64) f64) !void {
         const b = try self.ensureNumber(self.pop());
         const a = try self.ensureNumber(self.pop());
-        const result = value_mod.Value{ .double = op(a, b) };
+        const result = Value{ .double = op(a, b) };
         try self.push(allocator, result);
     }
 
-    fn ensureNumber(self: *VM, value: value_mod.Value) !f64 {
+    fn ensureNumber(self: *VM, value: Value) !f64 {
         return switch (value) {
             .double => |val| val,
             else => {
@@ -118,21 +124,21 @@ pub const VM = struct {
     }
 
     fn concatenate(self: *VM, allocator: std.mem.Allocator) !void {
-        const a: *object_mod.ObjString = @ptrCast(@alignCast(self.pop().object));
-        const b: *object_mod.ObjString = @ptrCast(@alignCast(self.pop().object));
+        const a: *ObjString = @ptrCast(@alignCast(self.pop().object));
+        const b: *ObjString = @ptrCast(@alignCast(self.pop().object));
 
-        const str = try allocator.create(object_mod.ObjString);
+        const str = try allocator.create(ObjString);
         const chars = try std.mem.concat(allocator, u8, &[_][]const u8{ b.chars[0..b.length], a.chars[0..a.length] });
         const interned = self.strings.get(chars);
         if (interned) |ptr| {
-            str.* = object_mod.ObjString{ .chars = ptr, .length = chars.len, .obj = object_mod.Obj{ .obj_type = .String } };
+            str.* = ObjString{ .chars = ptr, .length = chars.len, .obj = Obj{ .obj_type = .String } };
             allocator.free(chars);
         } else {
-            str.* = object_mod.ObjString{ .chars = chars.ptr, .length = chars.len, .obj = object_mod.Obj{ .obj_type = .String } };
+            str.* = ObjString{ .chars = chars.ptr, .length = chars.len, .obj = Obj{ .obj_type = .String } };
             try self.strings.put(allocator, chars, chars.ptr);
         }
         try self.objects.append(allocator, str.asObj());
-        try self.push(allocator, value_mod.Value{ .object = str.asObj() });
+        try self.push(allocator, Value{ .object = str.asObj() });
     }
 
     pub fn step(self: *VM, allocator: std.mem.Allocator) !void {
@@ -146,7 +152,7 @@ pub const VM = struct {
             std.debug.print("\n", .{});
             _ = debug_mod.disassembleInstruction(self.chunk.?, self.ip);
         }
-        const instruction: chunk_mod.OpCode = @enumFromInt(self.readByte());
+        const instruction: OpCode = @enumFromInt(self.readByte());
         switch (instruction) {
             .OP_RETURN => {
                 const value = self.pop();
@@ -158,13 +164,13 @@ pub const VM = struct {
                 const constant = self.readConstant();
                 try self.push(allocator, constant);
             },
-            .OP_NIL => try self.push(allocator, value_mod.Value.nil),
-            .OP_FALSE => try self.push(allocator, value_mod.Value{ .bool = false }),
-            .OP_TRUE => try self.push(allocator, value_mod.Value{ .bool = true }),
+            .OP_NIL => try self.push(allocator, Value.nil),
+            .OP_FALSE => try self.push(allocator, Value{ .bool = false }),
+            .OP_TRUE => try self.push(allocator, Value{ .bool = true }),
             .OP_NEGATE => {
                 const value = self.pop();
                 const result = switch (value) {
-                    .double => |double| value_mod.Value{ .double = -double },
+                    .double => |double| Value{ .double = -double },
                     else => {
                         self.runtimeError("Operand must be a number.", .{});
                         return InterpretError.InterpretRuntimeError;
@@ -188,21 +194,21 @@ pub const VM = struct {
             .OP_SUBTRACT => try self.binaryOp(allocator, sub),
             .OP_MULTIPLY => try self.binaryOp(allocator, mul),
             .OP_DIVIDE => try self.binaryOp(allocator, div),
-            .OP_NOT => try self.push(allocator, value_mod.Value{ .bool = self.pop().isFalsish() }),
+            .OP_NOT => try self.push(allocator, Value{ .bool = self.pop().isFalsish() }),
             .OP_EQUAL => {
                 const b = self.pop();
                 const a = self.pop();
-                try self.push(allocator, value_mod.Value{ .bool = a.isEqual(b) });
+                try self.push(allocator, Value{ .bool = a.isEqual(b) });
             },
             .OP_GREATER => {
                 const b = try self.ensureNumber(self.pop());
                 const a = try self.ensureNumber(self.pop());
-                try self.push(allocator, value_mod.Value{ .bool = a > b });
+                try self.push(allocator, Value{ .bool = a > b });
             },
             .OP_LESS => {
                 const b = try self.ensureNumber(self.pop());
                 const a = try self.ensureNumber(self.pop());
-                try self.push(allocator, value_mod.Value{ .bool = a < b });
+                try self.push(allocator, Value{ .bool = a < b });
             },
         }
     }
@@ -234,16 +240,16 @@ test "addition" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "1+2", &chunk);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 1 }, vm.stack.items[0]);
+    try std.testing.expectEqual(Value{ .double = 1 }, vm.stack.items[0]);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 2 }, vm.stack.items[1]);
+    try std.testing.expectEqual(Value{ .double = 2 }, vm.stack.items[1]);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 3 }, vm.stack.items[0]);
+    try std.testing.expectEqual(Value{ .double = 3 }, vm.stack.items[0]);
     try vm.step(allocator);
 }
 
@@ -253,16 +259,16 @@ test "multiplication" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "7 * 5", &chunk);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 7 }, vm.stack.items[0]);
+    try std.testing.expectEqual(Value{ .double = 7 }, vm.stack.items[0]);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 5 }, vm.stack.items[1]);
+    try std.testing.expectEqual(Value{ .double = 5 }, vm.stack.items[1]);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 35 }, vm.stack.items[0]);
+    try std.testing.expectEqual(Value{ .double = 35 }, vm.stack.items[0]);
     try vm.step(allocator);
 }
 
@@ -272,20 +278,20 @@ test "grouping" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "(3 + 2) * 2", &chunk);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 3 }, vm.stack.items[0]);
+    try std.testing.expectEqual(Value{ .double = 3 }, vm.stack.items[0]);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 2 }, vm.stack.items[1]);
+    try std.testing.expectEqual(Value{ .double = 2 }, vm.stack.items[1]);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 5 }, vm.stack.items[0]);
+    try std.testing.expectEqual(Value{ .double = 5 }, vm.stack.items[0]);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 2 }, vm.stack.items[1]);
+    try std.testing.expectEqual(Value{ .double = 2 }, vm.stack.items[1]);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 10 }, vm.stack.items[0]);
+    try std.testing.expectEqual(Value{ .double = 10 }, vm.stack.items[0]);
     try vm.step(allocator);
 }
 
@@ -295,19 +301,19 @@ test "precedence" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "3 + 2 * 2", &chunk);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 3 }, vm.stack.items[0]);
+    try std.testing.expectEqual(Value{ .double = 3 }, vm.stack.items[0]);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 2 }, vm.stack.items[1]);
+    try std.testing.expectEqual(Value{ .double = 2 }, vm.stack.items[1]);
     try vm.step(allocator);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 4 }, vm.stack.items[1]);
+    try std.testing.expectEqual(Value{ .double = 4 }, vm.stack.items[1]);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .double = 7 }, vm.stack.items[0]);
+    try std.testing.expectEqual(Value{ .double = 7 }, vm.stack.items[0]);
     try vm.step(allocator);
 }
 
@@ -317,12 +323,12 @@ test "negative false is an error" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "- false", &chunk);
     try vm.step(allocator);
-    try std.testing.expectEqual(value_mod.Value{ .bool = false }, vm.stack.items[0]);
+    try std.testing.expectEqual(Value{ .bool = false }, vm.stack.items[0]);
     const result = vm.step(allocator);
     try std.testing.expectError(InterpretError.InterpretRuntimeError, result);
 }
@@ -333,7 +339,7 @@ test "3 + true is an error" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "3 + true", &chunk);
@@ -349,7 +355,7 @@ test "!nil is true" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "!nil", &chunk);
@@ -364,7 +370,7 @@ test "!5 is false" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "!5", &chunk);
@@ -379,14 +385,14 @@ test "concatenate two strings" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "\"hello \" + \"world\"", &chunk);
     try vm.step(allocator);
     try vm.step(allocator);
     try vm.step(allocator);
-    const top: *object_mod.ObjString = @ptrCast(@alignCast(vm.stack.items[0].object));
+    const top: *ObjString = @ptrCast(@alignCast(vm.stack.items[0].object));
     try std.testing.expectEqualStrings("hello world", top.chars[0..top.length]);
 }
 
@@ -396,7 +402,7 @@ test "what if two same strings" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "\"hello\" + \"hello\"", &chunk);
@@ -413,7 +419,7 @@ test "5 == 5" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "5 == 5", &chunk);
@@ -430,7 +436,7 @@ test "6 != 5" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "6 != 5", &chunk);
@@ -448,7 +454,7 @@ test "6 > 5" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "6 > 5", &chunk);
@@ -465,7 +471,7 @@ test "string not equal 5" {
     var vm = VM.init;
     defer vm.deinit(allocator);
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     try vm.introspectInterpret(allocator, "\"hello\" == 5", &chunk);
