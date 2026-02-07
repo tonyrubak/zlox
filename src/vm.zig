@@ -4,6 +4,7 @@ const chunk_mod = @import("chunk.zig");
 const value_mod = @import("value.zig");
 const debug_mod = @import("debug.zig");
 const compiler_mod = @import("compiler.zig");
+const object_mod = @import("object.zig");
 
 pub const InterpretError = error{
     InterpretCompileError,
@@ -15,12 +16,14 @@ pub const VM = struct {
     ip: usize,
     stack: std.ArrayList(value_mod.Value),
     trace_execution: bool,
+    objects: std.ArrayList(*object_mod.Obj),
 
     pub const init = VM{
         .chunk = null,
         .ip = 0,
-        .stack = std.ArrayList(value_mod.Value).empty,
+        .stack = .empty,
         .trace_execution = true,
+        .objects = .empty,
     };
 
     fn push(self: *VM, allocator: std.mem.Allocator, value: value_mod.Value) !void {
@@ -45,7 +48,7 @@ pub const VM = struct {
         var chunk = chunk_mod.Chunk.empty;
         defer chunk.deinit(allocator);
 
-        var compiler = compiler_mod.Compiler.init(source, &chunk);
+        var compiler = compiler_mod.Compiler.init(source, &chunk, &self.objects);
         if (!compiler.compile(allocator)) {
             return InterpretError.InterpretCompileError;
         }
@@ -57,7 +60,7 @@ pub const VM = struct {
     }
 
     fn introspectInterpret(self: *VM, allocator: std.mem.Allocator, source: []const u8, chunk: *chunk_mod.Chunk) !void {
-        var compiler = compiler_mod.Compiler.init(source, chunk);
+        var compiler = compiler_mod.Compiler.init(source, chunk, &self.objects);
 
         if (!compiler.compile(allocator)) {
             return InterpretError.InterpretCompileError;
@@ -161,6 +164,10 @@ pub const VM = struct {
 
     pub fn deinit(self: *VM, allocator: std.mem.Allocator) void {
         self.stack.deinit(allocator);
+        for (self.objects.items) |object| {
+            object.deinit(allocator);
+        }
+        self.objects.deinit(allocator);
     }
 };
 

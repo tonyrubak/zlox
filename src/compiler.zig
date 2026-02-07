@@ -2,6 +2,7 @@ const std = @import("std");
 const chunk_mod = @import("chunk.zig");
 const scanner_mod = @import("scanner.zig");
 const value_mod = @import("value.zig");
+const object_mod = @import("object.zig");
 
 const Precedence = enum(u8) { None, Assignment, Or, And, Equality, Comparison, Term, Factor, Unary, Call, Primary };
 
@@ -43,7 +44,7 @@ fn getRule(token_type: scanner_mod.TokenType) ParseRule {
         .TOKEN_LESS => .{ .prefix = null, .infix = null, .precedence = .None },
         .TOKEN_LESS_EQUAL => .{ .prefix = null, .infix = null, .precedence = .None },
         .TOKEN_IDENTIFIER => .{ .prefix = null, .infix = null, .precedence = .None },
-        .TOKEN_STRING => .{ .prefix = null, .infix = null, .precedence = .None },
+        .TOKEN_STRING => .{ .prefix = Compiler.string, .infix = null, .precedence = .None },
         .TOKEN_NUMBER => .{ .prefix = Compiler.number, .infix = null, .precedence = .None },
         .TOKEN_AND => .{ .prefix = null, .infix = null, .precedence = .None },
         .TOKEN_CLASS => .{ .prefix = null, .infix = null, .precedence = .None },
@@ -60,8 +61,9 @@ pub const Compiler = struct {
     had_error: bool,
     panic_mode: bool,
     chunk: *chunk_mod.Chunk,
+    objects: *std.ArrayList(*object_mod.Obj),
 
-    pub fn init(source: []const u8, chunk: *chunk_mod.Chunk) Compiler {
+    pub fn init(source: []const u8, chunk: *chunk_mod.Chunk, objects: *std.ArrayList(*object_mod.Obj)) Compiler {
         const result = Compiler{
             .current = undefined,
             .previous = undefined,
@@ -69,6 +71,7 @@ pub const Compiler = struct {
             .had_error = false,
             .panic_mode = false,
             .chunk = chunk,
+            .objects = objects,
         };
 
         return result;
@@ -174,6 +177,16 @@ pub const Compiler = struct {
         try self.emitConstant(allocator, .{ .double = value });
     }
 
+    fn string(self: *Compiler, allocator: std.mem.Allocator) !void {
+        const len = self.previous.lexeme.len;
+        const str = self.previous.lexeme[1 .. len - 1];
+        const ptr = try allocator.dupe(u8, str);
+        var obj = try allocator.create(object_mod.ObjString);
+        obj.* = object_mod.ObjString{ .chars = ptr.ptr, .length = ptr.len, .obj = object_mod.Obj{ .obj_type = .String } };
+        try self.objects.append(allocator, obj.asObj());
+        try self.emitConstant(allocator, .{ .object = obj.asObj() });
+    }
+
     fn unary(self: *Compiler, allocator: std.mem.Allocator) !void {
         const operator_type = self.previous.t;
 
@@ -234,7 +247,10 @@ test "advance the thing, get a token" {
     var chunk = chunk_mod.Chunk.empty;
     defer chunk.deinit(allocator);
 
-    var compiler = Compiler.init("!", &chunk);
+    var objects = std.ArrayList(*object_mod.Obj).empty;
+    defer objects.deinit(allocator);
+
+    var compiler = Compiler.init("!", &chunk, &objects);
     compiler.advance();
 
     try std.testing.expectEqual(.TOKEN_BANG, compiler.current.t);
@@ -246,7 +262,10 @@ test "advance the thing twice, get a previous" {
     var chunk = chunk_mod.Chunk.empty;
     defer chunk.deinit(allocator);
 
-    var compiler = Compiler.init("! =", &chunk);
+    var objects = std.ArrayList(*object_mod.Obj).empty;
+    defer objects.deinit(allocator);
+
+    var compiler = Compiler.init("! =", &chunk, &objects);
     compiler.advance();
     compiler.advance();
 
@@ -259,8 +278,11 @@ test "write a constant to the chunk pls" {
     var chunk = chunk_mod.Chunk.empty;
     defer chunk.deinit(allocator);
 
+    var objects = std.ArrayList(*object_mod.Obj).empty;
+    defer objects.deinit(allocator);
+
     {
-        var compiler = Compiler.init("42", &chunk);
+        var compiler = Compiler.init("42", &chunk, &objects);
         compiler.advance();
         compiler.advance();
         try compiler.number(allocator);
@@ -271,14 +293,39 @@ test "write a constant to the chunk pls" {
     try std.testing.expectEqual(value_mod.Value{ .double = 42 }, chunk.constants.items[0]);
 }
 
+test "write a string to the chunk pls" {
+    const allocator = std.testing.allocator;
+
+    var chunk = chunk_mod.Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    var objects = std.ArrayList(*object_mod.Obj).empty;
+    defer {
+        objects.items[0].deinit(allocator);
+        objects.deinit(allocator);
+    }
+
+    {
+        var compiler = Compiler.init("\"foo\"", &chunk, &objects);
+        compiler.advance();
+        compiler.advance();
+        try compiler.string(allocator);
+    }
+
+    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), chunk.code.items[0]);
+}
+
 test "infix addition" {
     const allocator = std.testing.allocator;
 
     var chunk = chunk_mod.Chunk.empty;
     defer chunk.deinit(allocator);
 
+    var objects = std.ArrayList(*object_mod.Obj).empty;
+    defer objects.deinit(allocator);
+
     {
-        var compiler = Compiler.init("2 + 3", &chunk);
+        var compiler = Compiler.init("2 + 3", &chunk, &objects);
         compiler.advance();
         try compiler.expression(allocator);
     }
@@ -296,8 +343,11 @@ test "unary negation" {
     var chunk = chunk_mod.Chunk.empty;
     defer chunk.deinit(allocator);
 
+    var objects = std.ArrayList(*object_mod.Obj).empty;
+    defer objects.deinit(allocator);
+
     {
-        var compiler = Compiler.init("-2", &chunk);
+        var compiler = Compiler.init("-2", &chunk, &objects);
         compiler.advance();
         try compiler.expression(allocator);
     }
