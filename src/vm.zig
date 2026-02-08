@@ -10,6 +10,7 @@ const compiler_mod = @import("compiler.zig");
 const Compiler = compiler_mod.Compiler;
 const object_mod = @import("object.zig");
 const Obj = object_mod.Obj;
+const ObjList = object_mod.ObjList;
 const ObjString = object_mod.ObjString;
 
 pub const InterpretError = error{
@@ -21,16 +22,14 @@ pub const VM = struct {
     chunk: ?*Chunk,
     ip: usize,
     stack: std.ArrayList(Value),
-    trace_execution: bool,
-    objects: std.ArrayList(*Obj),
+    objects: std.SinglyLinkedList,
     strings: std.StringHashMapUnmanaged([*]const u8),
 
     pub const init = VM{
         .chunk = null,
         .ip = 0,
         .stack = .empty,
-        .trace_execution = true,
-        .objects = .empty,
+        .objects = .{},
         .strings = .empty,
     };
 
@@ -124,8 +123,8 @@ pub const VM = struct {
     }
 
     fn concatenate(self: *VM, allocator: std.mem.Allocator) !void {
-        const a: *ObjString = @ptrCast(@alignCast(self.pop().object));
-        const b: *ObjString = @ptrCast(@alignCast(self.pop().object));
+        const a = self.pop().object.asObjString();
+        const b = self.pop().object.asObjString();
 
         const str = try allocator.create(ObjString);
         const chars = try std.mem.concat(allocator, u8, &[_][]const u8{ b.chars[0..b.length], a.chars[0..a.length] });
@@ -137,11 +136,13 @@ pub const VM = struct {
             str.* = ObjString{ .chars = chars.ptr, .length = chars.len, .obj = Obj{ .obj_type = .String } };
             try self.strings.put(allocator, chars, chars.ptr);
         }
-        try self.objects.append(allocator, str.asObj());
+        var l = try allocator.create(ObjList);
+        l.* = .{ .data = str.asObj() };
+        self.objects.prepend(&l.node);
         try self.push(allocator, Value{ .object = str.asObj() });
     }
 
-    pub fn step(self: *VM, allocator: std.mem.Allocator) !bool {
+    pub fn step(self: *VM, allocator: std.mem.Allocator) !void {
         if (comptime build_options.trace) {
             std.debug.print("          ", .{});
             for (self.stack.items) |item| {
@@ -158,7 +159,7 @@ pub const VM = struct {
                 const value = self.pop();
                 value.print();
                 std.debug.print("\n", .{});
-                return false;
+                return;
             },
             .OP_CONSTANT => {
                 const constant = self.readConstant();
@@ -211,20 +212,24 @@ pub const VM = struct {
                 try self.push(allocator, Value{ .bool = a < b });
             },
         }
-        return true;
+        return;
     }
 
     pub fn run(self: *VM, allocator: std.mem.Allocator) !void {
-        var cont = true;
-        while (cont) {
-            cont = self.step(allocator) catch false;
+        while (true) {
+            try self.step(allocator);
         }
     }
 
     pub fn deinit(self: *VM, allocator: std.mem.Allocator) void {
         self.stack.deinit(allocator);
-        for (self.objects.items) |object| {
-            object.deinit(allocator);
+        var object_iterator = self.objects.first;
+        while (object_iterator) |node| {
+            const next = node.next;
+            const l: *object_mod.ObjList = @fieldParentPtr("node", node);
+            l.data.deinit(allocator);
+            allocator.destroy(l);
+            object_iterator = next;
         }
         var string_iterator = self.strings.iterator();
         while (string_iterator.next()) |entry| {
@@ -232,7 +237,6 @@ pub const VM = struct {
             allocator.free(slice);
         }
         self.strings.deinit(allocator);
-        self.objects.deinit(allocator);
     }
 };
 

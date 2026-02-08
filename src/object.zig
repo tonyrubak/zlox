@@ -23,6 +23,11 @@ pub const Obj = extern struct {
     }
 };
 
+pub const ObjList = struct {
+    data: *Obj,
+    node: std.SinglyLinkedList.Node = .{},
+};
+
 pub const ObjString = extern struct {
     obj: Obj,
     length: usize,

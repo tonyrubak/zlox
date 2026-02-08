@@ -36,7 +36,7 @@ fn repl(allocator: std.mem.Allocator) !void {
             if (err == error.EndOfStream) break else return err;
         };
 
-        try vm.interpret(allocator, line.written());
+        vm.interpret(allocator, line.written()) catch {};
 
         in.toss(1);
         line.clearRetainingCapacity();

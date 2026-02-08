@@ -3,6 +3,7 @@ const chunk_mod = @import("chunk.zig");
 const scanner_mod = @import("scanner.zig");
 const value_mod = @import("value.zig");
 const object_mod = @import("object.zig");
+const ObjList = object_mod.ObjList;
 
 const Precedence = enum(u8) { None, Assignment, Or, And, Equality, Comparison, Term, Factor, Unary, Call, Primary };
 
@@ -61,10 +62,10 @@ pub const Compiler = struct {
     had_error: bool,
     panic_mode: bool,
     chunk: *chunk_mod.Chunk,
-    objects: *std.ArrayList(*object_mod.Obj),
+    objects: *std.SinglyLinkedList,
     strings: *std.StringHashMapUnmanaged([*]const u8),
 
-    pub fn init(source: []const u8, chunk: *chunk_mod.Chunk, objects: *std.ArrayList(*object_mod.Obj), strings: *std.StringHashMapUnmanaged([*]const u8)) Compiler {
+    pub fn init(source: []const u8, chunk: *chunk_mod.Chunk, objects: *std.SinglyLinkedList, strings: *std.StringHashMapUnmanaged([*]const u8)) Compiler {
         const result = Compiler{
             .current = undefined,
             .previous = undefined,
@@ -198,7 +199,9 @@ pub const Compiler = struct {
         try self.strings.put(allocator, str, ptr);
         var obj = try allocator.create(object_mod.ObjString);
         obj.* = object_mod.ObjString{ .chars = ptr, .length = str.len, .obj = object_mod.Obj{ .obj_type = .String } };
-        try self.objects.append(allocator, obj.asObj());
+        var l = try allocator.create(ObjList);
+        l.* = .{ .data = obj.asObj() };
+        self.objects.prepend(&l.node);
         try self.emitConstant(allocator, .{ .object = obj.asObj() });
     }
 
@@ -243,7 +246,7 @@ pub const Compiler = struct {
     fn errorAt(self: *Compiler, token: *const scanner_mod.Token, message: []const u8) void {
         if (self.panic_mode) return;
         self.panic_mode = true;
-        std.debug.print("[line {d} Error", .{token.line});
+        std.debug.print("[line {d}] Error", .{token.line});
 
         if (token.t == .TOKEN_EOF) {
             std.debug.print(" at end", .{});
@@ -262,8 +265,7 @@ test "advance the thing, get a token" {
     var chunk = chunk_mod.Chunk.empty;
     defer chunk.deinit(allocator);
 
-    var objects = std.ArrayList(*object_mod.Obj).empty;
-    defer objects.deinit(allocator);
+    var objects: std.SinglyLinkedList = .{};
 
     var strings = std.StringHashMapUnmanaged([*]const u8).empty;
     defer strings.deinit(allocator);
@@ -280,8 +282,7 @@ test "advance the thing twice, get a previous" {
     var chunk = chunk_mod.Chunk.empty;
     defer chunk.deinit(allocator);
 
-    var objects = std.ArrayList(*object_mod.Obj).empty;
-    defer objects.deinit(allocator);
+    var objects: std.SinglyLinkedList = .{};
 
     var strings = std.StringHashMapUnmanaged([*]const u8).empty;
     defer strings.deinit(allocator);
@@ -299,8 +300,7 @@ test "write a constant to the chunk pls" {
     var chunk = chunk_mod.Chunk.empty;
     defer chunk.deinit(allocator);
 
-    var objects = std.ArrayList(*object_mod.Obj).empty;
-    defer objects.deinit(allocator);
+    var objects: std.SinglyLinkedList = .{};
 
     var strings = std.StringHashMapUnmanaged([*]const u8).empty;
     defer strings.deinit(allocator);
@@ -323,10 +323,16 @@ test "write a string to the chunk pls" {
     var chunk = chunk_mod.Chunk.empty;
     defer chunk.deinit(allocator);
 
-    var objects = std.ArrayList(*object_mod.Obj).empty;
+    var objects: std.SinglyLinkedList = .{};
     defer {
-        objects.items[0].deinit(allocator);
-        objects.deinit(allocator);
+        var object_iterator = objects.first;
+        while (object_iterator) |node| {
+            const next = node.next;
+            const l: *object_mod.ObjList = @fieldParentPtr("node", node);
+            l.data.deinit(allocator);
+            allocator.destroy(l);
+            object_iterator = next;
+        }
     }
 
     var strings = std.StringHashMapUnmanaged([*]const u8).empty;
@@ -355,8 +361,7 @@ test "infix addition" {
     var chunk = chunk_mod.Chunk.empty;
     defer chunk.deinit(allocator);
 
-    var objects = std.ArrayList(*object_mod.Obj).empty;
-    defer objects.deinit(allocator);
+    var objects: std.SinglyLinkedList = .{};
 
     var strings = std.StringHashMapUnmanaged([*]const u8).empty;
     defer strings.deinit(allocator);
@@ -380,8 +385,7 @@ test "unary negation" {
     var chunk = chunk_mod.Chunk.empty;
     defer chunk.deinit(allocator);
 
-    var objects = std.ArrayList(*object_mod.Obj).empty;
-    defer objects.deinit(allocator);
+    var objects: std.SinglyLinkedList = .{};
 
     var strings = std.StringHashMapUnmanaged([*]const u8).empty;
     defer strings.deinit(allocator);
