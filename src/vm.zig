@@ -10,7 +10,6 @@ const compiler_mod = @import("compiler.zig");
 const Compiler = compiler_mod.Compiler;
 const object_mod = @import("object.zig");
 const Obj = object_mod.Obj;
-const ObjList = object_mod.ObjList;
 const ObjString = object_mod.ObjString;
 
 pub const InterpretError = error{

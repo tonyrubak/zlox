@@ -10,7 +10,6 @@ const value_mod = @import("value.zig");
 const Value = value_mod.Value;
 const object_mod = @import("object.zig");
 const Obj = object_mod.Obj;
-const ObjList = object_mod.ObjList;
 const ObjString = object_mod.ObjString;
 
 const Precedence = enum(u8) { None, Assignment, Or, And, Equality, Comparison, Term, Factor, Unary, Call, Primary };
