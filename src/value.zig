@@ -27,6 +27,10 @@ pub const Value = union(enum) {
         };
     }
 
+    pub fn isString(self: Value) bool {
+        return self.isObjType(.String);
+    }
+
     pub fn isEqual(self: Value, other: Value) bool {
         if (!std.mem.eql(u8, @tagName(self), @tagName(other))) {
             return false;
@@ -36,7 +40,7 @@ pub const Value = union(enum) {
             .bool => return self.bool == other.bool,
             .double => return self.double == other.double,
             .nil => return true,
-            else => unreachable,
+            .object => return self.object.asObjString().chars == other.object.asObjString().chars,
         }
     }
 

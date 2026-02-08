@@ -447,6 +447,23 @@ test "5 == 5" {
     try std.testing.expect(top);
 }
 
+test "\"hello\" == \"hello\"" {
+    const allocator = std.testing.allocator;
+
+    var vm = VM.init;
+    defer vm.deinit(allocator);
+
+    var chunk = Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    try vm.introspectInterpret(allocator, "\"hello\" == \"hello\";", &chunk);
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
+    const top = vm.stack.items[0].bool;
+    try std.testing.expect(top);
+}
+
 test "6 != 5" {
     const allocator = std.testing.allocator;
 
