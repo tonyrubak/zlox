@@ -1,10 +1,17 @@
 const std = @import("std");
 const chunk_mod = @import("chunk.zig");
+const Chunk = chunk_mod.Chunk;
+const OpCode = chunk_mod.OpCode;
 const scanner_mod = @import("scanner.zig");
+const Scanner = scanner_mod.Scanner;
+const Token = scanner_mod.Token;
 const TokenType = scanner_mod.TokenType;
 const value_mod = @import("value.zig");
+const Value = value_mod.Value;
 const object_mod = @import("object.zig");
+const Obj = object_mod.Obj;
 const ObjList = object_mod.ObjList;
+const ObjString = object_mod.ObjString;
 
 const Precedence = enum(u8) { None, Assignment, Or, And, Equality, Comparison, Term, Factor, Unary, Call, Primary };
 
@@ -24,7 +31,7 @@ const ParseRule = struct {
     precedence: Precedence,
 };
 
-fn getRule(token_type: scanner_mod.TokenType) ParseRule {
+fn getRule(token_type: TokenType) ParseRule {
     return switch (token_type) {
         .TOKEN_LEFT_PAREN => .{ .prefix = Compiler.grouping, .infix = null, .precedence = .None },
         .TOKEN_RIGHT_PAREN => .{ .prefix = null, .infix = null, .precedence = .None },
@@ -57,20 +64,20 @@ fn getRule(token_type: scanner_mod.TokenType) ParseRule {
     };
 }
 pub const Compiler = struct {
-    current: scanner_mod.Token,
-    previous: scanner_mod.Token,
-    scanner: scanner_mod.Scanner,
+    current: Token,
+    previous: Token,
+    scanner: Scanner,
     had_error: bool,
     panic_mode: bool,
-    chunk: *chunk_mod.Chunk,
+    chunk: *Chunk,
     objects: *std.SinglyLinkedList,
     strings: *std.StringHashMapUnmanaged([*]const u8),
 
-    pub fn init(source: []const u8, chunk: *chunk_mod.Chunk, objects: *std.SinglyLinkedList, strings: *std.StringHashMapUnmanaged([*]const u8)) Compiler {
+    pub fn init(source: []const u8, chunk: *Chunk, objects: *std.SinglyLinkedList, strings: *std.StringHashMapUnmanaged([*]const u8)) Compiler {
         const result = Compiler{
             .current = undefined,
             .previous = undefined,
-            .scanner = scanner_mod.Scanner.init(source),
+            .scanner = Scanner.init(source),
             .had_error = false,
             .panic_mode = false,
             .chunk = chunk,
@@ -110,7 +117,7 @@ pub const Compiler = struct {
         self.errorAtCurrent(message);
     }
 
-    fn check(self: *Compiler, token_type: TokenType) bool {
+    fn check(self: *const Compiler, token_type: TokenType) bool {
         return self.current.t == token_type;
     }
 
@@ -130,10 +137,10 @@ pub const Compiler = struct {
     }
 
     fn emitReturn(self: *Compiler, allocator: std.mem.Allocator) !void {
-        try self.emitByte(allocator, @intFromEnum(chunk_mod.OpCode.OP_RETURN));
+        try self.emitOp(allocator, OpCode.OP_RETURN);
     }
 
-    fn makeConstant(self: *Compiler, allocator: std.mem.Allocator, value: value_mod.Value) !u8 {
+    fn makeConstant(self: *Compiler, allocator: std.mem.Allocator, value: Value) !u8 {
         const constant = try self.chunk.addConstant(allocator, value);
         if (constant > std.math.maxInt(u8)) {
             self.errorAtPrev("Too many constants in one chunk.");
@@ -143,16 +150,16 @@ pub const Compiler = struct {
         return constant;
     }
 
-    fn emitConstant(self: *Compiler, allocator: std.mem.Allocator, value: value_mod.Value) !void {
+    fn emitConstant(self: *Compiler, allocator: std.mem.Allocator, value: Value) !void {
         const constant = try self.makeConstant(allocator, value);
-        try self.emitBytes(allocator, @intFromEnum(chunk_mod.OpCode.OP_CONSTANT), constant);
+        try self.emitBytes(allocator, @intFromEnum(OpCode.OP_CONSTANT), constant);
     }
 
-    fn emitOp(self: *Compiler, allocator: std.mem.Allocator, opcode: chunk_mod.OpCode) !void {
+    fn emitOp(self: *Compiler, allocator: std.mem.Allocator, opcode: OpCode) !void {
         try self.emitByte(allocator, @intFromEnum(opcode));
     }
 
-    fn emitOps(self: *Compiler, allocator: std.mem.Allocator, op1: chunk_mod.OpCode, op2: chunk_mod.OpCode) !void {
+    fn emitOps(self: *Compiler, allocator: std.mem.Allocator, op1: OpCode, op2: OpCode) !void {
         try self.emitBytes(allocator, @intFromEnum(op1), @intFromEnum(op2));
     }
 
@@ -181,7 +188,7 @@ pub const Compiler = struct {
     }
 
     fn literal(self: *Compiler, allocator: std.mem.Allocator) !void {
-        const opcode: chunk_mod.OpCode = switch (self.previous.t) {
+        const opcode: OpCode = switch (self.previous.t) {
             .TOKEN_FALSE => .OP_FALSE,
             .TOKEN_NIL => .OP_NIL,
             .TOKEN_TRUE => .OP_TRUE,
@@ -251,8 +258,8 @@ pub const Compiler = struct {
         const str = self.previous.lexeme[1 .. len - 1];
         const ptr = self.strings.get(str) orelse (try allocator.dupe(u8, str)).ptr;
         try self.strings.put(allocator, str, ptr);
-        var obj = try allocator.create(object_mod.ObjString);
-        obj.* = object_mod.ObjString{ .chars = ptr, .length = str.len, .obj = object_mod.Obj{ .obj_type = .String } };
+        var obj = try allocator.create(ObjString);
+        obj.* = ObjString{ .chars = ptr, .length = str.len, .obj = Obj{ .obj_type = .String } };
         var l = try allocator.create(ObjList);
         l.* = .{ .data = obj.asObj() };
         self.objects.prepend(&l.node);
@@ -264,7 +271,7 @@ pub const Compiler = struct {
 
         try self.parsePrecedence(allocator, .Unary);
 
-        const opcode: chunk_mod.OpCode = switch (operator_type) {
+        const opcode: OpCode = switch (operator_type) {
             .TOKEN_BANG => .OP_NOT,
             .TOKEN_MINUS => .OP_NEGATE,
             else => unreachable,
@@ -297,7 +304,7 @@ pub const Compiler = struct {
         self.errorAt(&self.previous, message);
     }
 
-    fn errorAt(self: *Compiler, token: *const scanner_mod.Token, message: []const u8) void {
+    fn errorAt(self: *Compiler, token: *const Token, message: []const u8) void {
         if (self.panic_mode) return;
         self.panic_mode = true;
         std.debug.print("[line {d}] Error", .{token.line});
@@ -316,7 +323,7 @@ pub const Compiler = struct {
 test "advance the thing, get a token" {
     const allocator = std.testing.allocator;
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     var objects: std.SinglyLinkedList = .{};
@@ -333,7 +340,7 @@ test "advance the thing, get a token" {
 test "advance the thing twice, get a previous" {
     const allocator = std.testing.allocator;
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     var objects: std.SinglyLinkedList = .{};
@@ -351,7 +358,7 @@ test "advance the thing twice, get a previous" {
 test "write a constant to the chunk pls" {
     const allocator = std.testing.allocator;
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     var objects: std.SinglyLinkedList = .{};
@@ -366,15 +373,15 @@ test "write a constant to the chunk pls" {
         try compiler.number(allocator);
     }
 
-    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), chunk.code.items[0]);
+    try std.testing.expectEqual(@intFromEnum(OpCode.OP_CONSTANT), chunk.code.items[0]);
     try std.testing.expectEqual(0, chunk.code.items[1]);
-    try std.testing.expectEqual(value_mod.Value{ .double = 42 }, chunk.constants.items[0]);
+    try std.testing.expectEqual(Value{ .double = 42 }, chunk.constants.items[0]);
 }
 
 test "write a string to the chunk pls" {
     const allocator = std.testing.allocator;
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     var objects: std.SinglyLinkedList = .{};
@@ -382,7 +389,7 @@ test "write a string to the chunk pls" {
         var object_iterator = objects.first;
         while (object_iterator) |node| {
             const next = node.next;
-            const l: *object_mod.ObjList = @fieldParentPtr("node", node);
+            const l: *ObjList = @fieldParentPtr("node", node);
             l.data.deinit(allocator);
             allocator.destroy(l);
             object_iterator = next;
@@ -406,13 +413,13 @@ test "write a string to the chunk pls" {
         try compiler.string(allocator);
     }
 
-    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), chunk.code.items[0]);
+    try std.testing.expectEqual(@intFromEnum(OpCode.OP_CONSTANT), chunk.code.items[0]);
 }
 
 test "infix addition" {
     const allocator = std.testing.allocator;
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     var objects: std.SinglyLinkedList = .{};
@@ -426,17 +433,17 @@ test "infix addition" {
         try compiler.expression(allocator);
     }
 
-    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), chunk.code.items[0]);
+    try std.testing.expectEqual(@intFromEnum(OpCode.OP_CONSTANT), chunk.code.items[0]);
     try std.testing.expectEqual(0, chunk.code.items[1]);
-    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), chunk.code.items[2]);
+    try std.testing.expectEqual(@intFromEnum(OpCode.OP_CONSTANT), chunk.code.items[2]);
     try std.testing.expectEqual(1, chunk.code.items[3]);
-    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_ADD), chunk.code.items[4]);
+    try std.testing.expectEqual(@intFromEnum(OpCode.OP_ADD), chunk.code.items[4]);
 }
 
 test "unary negation" {
     const allocator = std.testing.allocator;
 
-    var chunk = chunk_mod.Chunk.empty;
+    var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
     var objects: std.SinglyLinkedList = .{};
@@ -450,7 +457,7 @@ test "unary negation" {
         try compiler.expression(allocator);
     }
 
-    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_CONSTANT), chunk.code.items[0]);
+    try std.testing.expectEqual(@intFromEnum(OpCode.OP_CONSTANT), chunk.code.items[0]);
     try std.testing.expectEqual(0, chunk.code.items[1]);
-    try std.testing.expectEqual(@intFromEnum(chunk_mod.OpCode.OP_NEGATE), chunk.code.items[2]);
+    try std.testing.expectEqual(@intFromEnum(OpCode.OP_NEGATE), chunk.code.items[2]);
 }
