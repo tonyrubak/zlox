@@ -27,6 +27,6 @@ pub const ObjString = struct {
     chars: [*]const u8,
 
     pub fn asObj(self: *ObjString) *Obj {
-        return @ptrCast(self);
+        return &self.obj;
     }
 };
