@@ -142,7 +142,7 @@ pub const VM = struct {
         try self.push(allocator, Value{ .object = str.asObj() });
     }
 
-    pub fn step(self: *VM, allocator: std.mem.Allocator) !void {
+    pub fn step(self: *VM, allocator: std.mem.Allocator) !bool {
         if (comptime build_options.trace) {
             std.debug.print("          ", .{});
             for (self.stack.items) |item| {
@@ -156,10 +156,7 @@ pub const VM = struct {
         const instruction: OpCode = @enumFromInt(self.readByte());
         switch (instruction) {
             .OP_RETURN => {
-                const value = self.pop();
-                value.print();
-                std.debug.print("\n", .{});
-                return;
+                return false;
             },
             .OP_CONSTANT => {
                 const constant = self.readConstant();
@@ -211,14 +208,19 @@ pub const VM = struct {
                 const a = try self.ensureNumber(self.pop());
                 try self.push(allocator, Value{ .bool = a < b });
             },
+            .OP_PRINT => {
+                self.pop().print();
+                std.debug.print("\n", .{});
+            },
+            .OP_POP => {
+                _ = self.pop();
+            },
         }
-        return;
+        return true;
     }
 
     pub fn run(self: *VM, allocator: std.mem.Allocator) !void {
-        while (true) {
-            try self.step(allocator);
-        }
+        while (try self.step(allocator)) {}
     }
 
     pub fn deinit(self: *VM, allocator: std.mem.Allocator) void {
@@ -240,6 +242,18 @@ pub const VM = struct {
     }
 };
 
+test "expressions need semi-colons" {
+    const allocator = std.testing.allocator;
+
+    var vm = VM.init;
+    defer vm.deinit(allocator);
+
+    var chunk = Chunk.empty;
+    defer chunk.deinit(allocator);
+
+    try std.testing.expectError(InterpretError.InterpretCompileError, vm.introspectInterpret(allocator, "1+2", &chunk));
+}
+
 test "addition" {
     const allocator = std.testing.allocator;
 
@@ -249,14 +263,14 @@ test "addition" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "1+2", &chunk);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "1+2;", &chunk);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 1 }, vm.stack.items[0]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 2 }, vm.stack.items[1]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 3 }, vm.stack.items[0]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
 }
 
 test "multiplication" {
@@ -268,14 +282,14 @@ test "multiplication" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "7 * 5", &chunk);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "7 * 5;", &chunk);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 7 }, vm.stack.items[0]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 5 }, vm.stack.items[1]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 35 }, vm.stack.items[0]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
 }
 
 test "grouping" {
@@ -287,18 +301,18 @@ test "grouping" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "(3 + 2) * 2", &chunk);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "(3 + 2) * 2;", &chunk);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 3 }, vm.stack.items[0]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 2 }, vm.stack.items[1]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 5 }, vm.stack.items[0]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 2 }, vm.stack.items[1]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 10 }, vm.stack.items[0]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
 }
 
 test "precedence" {
@@ -310,17 +324,17 @@ test "precedence" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "3 + 2 * 2", &chunk);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "3 + 2 * 2;", &chunk);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 3 }, vm.stack.items[0]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 2 }, vm.stack.items[1]);
-    try vm.step(allocator);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 4 }, vm.stack.items[1]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .double = 7 }, vm.stack.items[0]);
-    try vm.step(allocator);
+    try std.testing.expect(try vm.step(allocator));
 }
 
 test "negative false is an error" {
@@ -332,8 +346,8 @@ test "negative false is an error" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "- false", &chunk);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "- false;", &chunk);
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(Value{ .bool = false }, vm.stack.items[0]);
     const result = vm.step(allocator);
     try std.testing.expectError(InterpretError.InterpretRuntimeError, result);
@@ -348,9 +362,9 @@ test "3 + true is an error" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "3 + true", &chunk);
-    try vm.step(allocator);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "3 + true;", &chunk);
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
     const result = vm.step(allocator);
     try std.testing.expectError(InterpretError.InterpretRuntimeError, result);
 }
@@ -364,9 +378,9 @@ test "!nil is true" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "!nil", &chunk);
-    try vm.step(allocator);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "!nil;", &chunk);
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(true, vm.stack.items[0].bool);
 }
 
@@ -379,9 +393,9 @@ test "!5 is false" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "!5", &chunk);
-    try vm.step(allocator);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "!5;", &chunk);
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
     try std.testing.expectEqual(false, vm.stack.items[0].bool);
 }
 
@@ -394,10 +408,10 @@ test "concatenate two strings" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "\"hello \" + \"world\"", &chunk);
-    try vm.step(allocator);
-    try vm.step(allocator);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "\"hello \" + \"world\";", &chunk);
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
     const top: *ObjString = @ptrCast(@alignCast(vm.stack.items[0].object));
     try std.testing.expectEqualStrings("hello world", top.chars[0..top.length]);
 }
@@ -411,10 +425,10 @@ test "what if two same strings" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "\"hello\" + \"hello\"", &chunk);
-    try vm.step(allocator);
-    try vm.step(allocator);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "\"hello\" + \"hello\";", &chunk);
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
     const top = vm.stack.items[0].object.asObjString();
     try std.testing.expectEqualStrings("hellohello", top.chars[0..top.length]);
 }
@@ -428,10 +442,10 @@ test "5 == 5" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "5 == 5", &chunk);
-    try vm.step(allocator);
-    try vm.step(allocator);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "5 == 5;", &chunk);
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
     const top = vm.stack.items[0].bool;
     try std.testing.expect(top);
 }
@@ -445,11 +459,11 @@ test "6 != 5" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "6 != 5", &chunk);
-    try vm.step(allocator);
-    try vm.step(allocator);
-    try vm.step(allocator);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "6 != 5;", &chunk);
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
     const top = vm.stack.items[0].bool;
     try std.testing.expect(top);
 }
@@ -463,10 +477,10 @@ test "6 > 5" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "6 > 5", &chunk);
-    try vm.step(allocator);
-    try vm.step(allocator);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "6 > 5;", &chunk);
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
     const top = vm.stack.items[0].bool;
     try std.testing.expect(top);
 }
@@ -480,10 +494,10 @@ test "string not equal 5" {
     var chunk = Chunk.empty;
     defer chunk.deinit(allocator);
 
-    try vm.introspectInterpret(allocator, "\"hello\" == 5", &chunk);
-    try vm.step(allocator);
-    try vm.step(allocator);
-    try vm.step(allocator);
+    try vm.introspectInterpret(allocator, "\"hello\" == 5;", &chunk);
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
+    try std.testing.expect(try vm.step(allocator));
     const top = vm.stack.items[0].bool;
     try std.testing.expect(!top);
 }

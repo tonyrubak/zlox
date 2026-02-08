@@ -147,7 +147,7 @@ pub const Scanner = struct {
     }
 
     fn peekNext(self: *Scanner) ?u8 {
-        if (self.isAtEnd()) return null;
+        if (self.index + 1 >= self.source.len) return null;
         return self.source[self.index + 1];
     }
 

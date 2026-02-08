@@ -1,6 +1,7 @@
 const std = @import("std");
 const chunk_mod = @import("chunk.zig");
 const scanner_mod = @import("scanner.zig");
+const TokenType = scanner_mod.TokenType;
 const value_mod = @import("value.zig");
 const object_mod = @import("object.zig");
 const ObjList = object_mod.ObjList;
@@ -82,8 +83,9 @@ pub const Compiler = struct {
 
     pub fn compile(self: *Compiler, allocator: std.mem.Allocator) bool {
         self.advance();
-        self.expression(allocator) catch @panic("Error allocating memory during parsing");
-        self.consume(.TOKEN_EOF, "Expected end of expression.");
+        while (!self.match(.TOKEN_EOF)) {
+            self.declaration(allocator) catch @panic("Error allocating memory during parsing");
+        }
         self.endCompiler(allocator) catch @panic("Could not write EOF to chunk");
         return !self.had_error;
     }
@@ -99,13 +101,23 @@ pub const Compiler = struct {
         }
     }
 
-    fn consume(self: *Compiler, token_type: scanner_mod.TokenType, message: []const u8) void {
+    fn consume(self: *Compiler, token_type: TokenType, message: []const u8) void {
         if (self.current.t == token_type) {
             self.advance();
             return;
         }
 
         self.errorAtCurrent(message);
+    }
+
+    fn check(self: *Compiler, token_type: TokenType) bool {
+        return self.current.t == token_type;
+    }
+
+    fn match(self: *Compiler, token_type: TokenType) bool {
+        if (!self.check(token_type)) return false;
+        self.advance();
+        return true;
     }
 
     fn emitByte(self: *Compiler, allocator: std.mem.Allocator, byte: u8) !void {
@@ -182,6 +194,48 @@ pub const Compiler = struct {
     fn expression(self: *Compiler, allocator: std.mem.Allocator) !void {
         try self.parsePrecedence(allocator, .Assignment);
     }
+
+    fn expressionStatement(self: *Compiler, allocator: std.mem.Allocator) !void {
+        try self.expression(allocator);
+        self.consume(.TOKEN_SEMICOLON, "Expect ';' after expression.");
+        try self.emitOp(allocator, .OP_POP);
+    }
+
+    fn printStatement(self: *Compiler, allocator: std.mem.Allocator) !void {
+        try self.expression(allocator);
+        self.consume(.TOKEN_SEMICOLON, "Expect ';' after value.");
+        try self.emitOp(allocator, .OP_PRINT);
+    }
+
+    fn synchronize(self: *Compiler) void {
+        self.panic_mode = false;
+
+        while (self.current.t != .TOKEN_EOF) {
+            if (self.previous.t == .TOKEN_SEMICOLON) return;
+
+            switch (self.current.t) {
+                .TOKEN_CLASS, .TOKEN_FUN, .TOKEN_VAR, .TOKEN_FOR, .TOKEN_IF, .TOKEN_WHILE, .TOKEN_PRINT, .TOKEN_RETURN => return,
+                else => {},
+            }
+
+            self.advance();
+        }
+    }
+
+    fn declaration(self: *Compiler, allocator: std.mem.Allocator) !void {
+        try self.statement(allocator);
+
+        if (self.panic_mode) self.synchronize();
+    }
+
+    fn statement(self: *Compiler, allocator: std.mem.Allocator) !void {
+        if (self.match(.TOKEN_PRINT)) {
+            try self.printStatement(allocator);
+        } else {
+            try self.expressionStatement(allocator);
+        }
+    }
+
     fn grouping(self: *Compiler, allocator: std.mem.Allocator) !void {
         try self.expression(allocator);
         self.consume(.TOKEN_RIGHT_PAREN, "Expect ')' after expression.");
