@@ -195,7 +195,7 @@ pub const Compiler = struct {
             else => unreachable,
         };
 
-        try self.emitByte(allocator, @intFromEnum(opcode));
+        try self.emitOp(allocator, opcode);
     }
 
     fn expression(self: *Compiler, allocator: std.mem.Allocator) !void {
