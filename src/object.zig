@@ -4,31 +4,24 @@ pub const ObjType = enum {
     String,
 };
 
-pub const Obj = extern struct {
+pub const Obj = struct {
     obj_type: ObjType,
+    node: std.SinglyLinkedList.Node = .{},
 
     pub fn deinit(self: *Obj, allocator: std.mem.Allocator) void {
         switch (self.obj_type) {
-            .String => {
-                const inner = self.asObjString();
-                allocator.destroy(inner);
-            },
+            .String => allocator.destroy(self.asObjString()),
         }
     }
 
     pub fn asObjString(self: *Obj) *ObjString {
         return switch (self.obj_type) {
-            .String => @ptrCast(@alignCast(self)),
+            .String => @fieldParentPtr("obj", self),
         };
     }
 };
 
-pub const ObjList = struct {
-    data: *Obj,
-    node: std.SinglyLinkedList.Node = .{},
-};
-
-pub const ObjString = extern struct {
+pub const ObjString = struct {
     obj: Obj,
     length: usize,
     chars: [*]const u8,

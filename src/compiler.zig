@@ -260,9 +260,7 @@ pub const Compiler = struct {
         try self.strings.put(allocator, str, ptr);
         var obj = try allocator.create(ObjString);
         obj.* = ObjString{ .chars = ptr, .length = str.len, .obj = Obj{ .obj_type = .String } };
-        var l = try allocator.create(ObjList);
-        l.* = .{ .data = obj.asObj() };
-        self.objects.prepend(&l.node);
+        self.objects.prepend(&(obj.asObj()).node);
         try self.emitConstant(allocator, .{ .object = obj.asObj() });
     }
 
@@ -389,9 +387,8 @@ test "write a string to the chunk pls" {
         var object_iterator = objects.first;
         while (object_iterator) |node| {
             const next = node.next;
-            const l: *ObjList = @fieldParentPtr("node", node);
-            l.data.deinit(allocator);
-            allocator.destroy(l);
+            const obj: *Obj = @fieldParentPtr("node", node);
+            obj.deinit(allocator);
             object_iterator = next;
         }
     }

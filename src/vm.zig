@@ -136,9 +136,7 @@ pub const VM = struct {
             str.* = ObjString{ .chars = chars.ptr, .length = chars.len, .obj = Obj{ .obj_type = .String } };
             try self.strings.put(allocator, chars, chars.ptr);
         }
-        var l = try allocator.create(ObjList);
-        l.* = .{ .data = str.asObj() };
-        self.objects.prepend(&l.node);
+        self.objects.prepend(&(str.asObj()).node);
         try self.push(allocator, Value{ .object = str.asObj() });
     }
 
@@ -228,9 +226,8 @@ pub const VM = struct {
         var object_iterator = self.objects.first;
         while (object_iterator) |node| {
             const next = node.next;
-            const l: *object_mod.ObjList = @fieldParentPtr("node", node);
-            l.data.deinit(allocator);
-            allocator.destroy(l);
+            const obj: *Obj = @fieldParentPtr("node", node);
+            obj.deinit(allocator);
             object_iterator = next;
         }
         var string_iterator = self.strings.iterator();
